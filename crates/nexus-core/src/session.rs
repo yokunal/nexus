@@ -104,8 +104,16 @@ impl SessionStore {
 
     pub fn save_message(&self, session_id: &str, msg: &Message) -> Result<(), SessionError> {
         let conn = self.connect()?;
-        let calls_json = msg.tool_calls.as_ref().map(serde_json::to_string).transpose()?;
-        let results_json = msg.tool_results.as_ref().map(serde_json::to_string).transpose()?;
+        let calls_json = msg
+            .tool_calls
+            .as_ref()
+            .map(serde_json::to_string)
+            .transpose()?;
+        let results_json = msg
+            .tool_results
+            .as_ref()
+            .map(serde_json::to_string)
+            .transpose()?;
 
         conn.execute(
             "INSERT INTO messages (session_id, role, content, tool_calls, tool_results, timestamp)
@@ -131,7 +139,8 @@ impl SessionStore {
     pub fn load_session(&self, session_id: &str) -> Result<Session, SessionError> {
         let conn = self.connect()?;
 
-        let mut stmt = conn.prepare("SELECT title, created_at, updated_at FROM sessions WHERE id = ?1")?;
+        let mut stmt =
+            conn.prepare("SELECT title, created_at, updated_at FROM sessions WHERE id = ?1")?;
         let session_data = stmt.query_row(params![session_id], |row| {
             Ok((
                 row.get::<_, String>(0)?,
@@ -166,12 +175,8 @@ impl SessionStore {
         let mut messages = Vec::new();
         for row in message_rows {
             let (role, content, calls_json, results_json, ts_str) = row?;
-            let tool_calls = calls_json
-                .map(|j| serde_json::from_str(&j))
-                .transpose()?;
-            let tool_results = results_json
-                .map(|j| serde_json::from_str(&j))
-                .transpose()?;
+            let tool_calls = calls_json.map(|j| serde_json::from_str(&j)).transpose()?;
+            let tool_results = results_json.map(|j| serde_json::from_str(&j)).transpose()?;
             let timestamp = DateTime::parse_from_rfc3339(&ts_str)
                 .map(|dt| dt.with_timezone(&Utc))
                 .unwrap_or_else(|_| Utc::now());
@@ -206,11 +211,86 @@ impl SessionStore {
         // If the last message was assistant with tool calls that never received tool results,
         // prune or mark it so it doesn't cause a 400 Bad Request error from the provider API.
         if let Some(last) = msgs.last() {
-            if last.role == "assistant" && last.tool_calls.is_some() && last.tool_results.is_none() {
+            if last.role == "assistant" && last.tool_calls.is_some() && last.tool_results.is_none()
+            {
                 // Dangling tool call without result - remove incomplete trailing turn
                 msgs.pop();
             }
         }
         msgs
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::env;
+
+    #[test]
+    fn test_session_lifecycle_and_persistence() {
+        let temp_db = env::temp_dir().join(format!("nexus_test_{}.db", Uuid::new_v4()));
+        let store = SessionStore::new(&temp_db).unwrap();
+
+        // Create session
+        let session = store.create_session("Test Session 1").unwrap();
+        assert_eq!(session.title, "Test Session 1");
+
+        // Save messages
+        let msg1 = Message {
+            role: "user".to_string(),
+            content: "Hello Nexus".to_string(),
+            tool_calls: None,
+            tool_results: None,
+            timestamp: Utc::now(),
+        };
+        store.save_message(&session.id, &msg1).unwrap();
+
+        let msg2 = Message {
+            role: "assistant".to_string(),
+            content: "Hello Boss".to_string(),
+            tool_calls: None,
+            tool_results: None,
+            timestamp: Utc::now(),
+        };
+        store.save_message(&session.id, &msg2).unwrap();
+
+        // Load session and verify exact restoration
+        let loaded = store.load_session(&session.id).unwrap();
+        assert_eq!(loaded.messages.len(), 2);
+        assert_eq!(loaded.messages[0].role, "user");
+        assert_eq!(loaded.messages[0].content, "Hello Nexus");
+        assert_eq!(loaded.messages[1].role, "assistant");
+        assert_eq!(loaded.messages[1].content, "Hello Boss");
+
+        let _ = std::fs::remove_file(&temp_db);
+    }
+
+    #[test]
+    fn test_dangling_tool_turn_validator() {
+        let msgs = vec![
+            Message {
+                role: "user".to_string(),
+                content: "Run test".to_string(),
+                tool_calls: None,
+                tool_results: None,
+                timestamp: Utc::now(),
+            },
+            Message {
+                role: "assistant".to_string(),
+                content: "Running...".to_string(),
+                tool_calls: Some(vec![crate::tools::ToolCall {
+                    id: "call_1".to_string(),
+                    name: "run_command".to_string(),
+                    arguments: serde_json::json!({"command": "cargo test"}),
+                }]),
+                tool_results: None,
+                timestamp: Utc::now(),
+            },
+        ];
+
+        // Dangling assistant tool call should be pruned to prevent API 400
+        let validated = SessionStore::validate_turns(msgs);
+        assert_eq!(validated.len(), 1);
+        assert_eq!(validated[0].role, "user");
     }
 }

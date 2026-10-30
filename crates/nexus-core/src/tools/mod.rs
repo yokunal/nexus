@@ -156,7 +156,11 @@ impl ToolManager {
         let full_path = self.sandbox.resolve_path(path_str)?;
 
         write_file::write_file_content(&full_path, content)?;
-        Ok(format!("Successfully wrote {} bytes to {}", content.len(), path_str))
+        Ok(format!(
+            "Successfully wrote {} bytes to {}",
+            content.len(),
+            path_str
+        ))
     }
 
     async fn handle_edit(&self, call: &ToolCall) -> Result<String, ToolError> {
@@ -196,5 +200,85 @@ impl ToolManager {
             "{}\nStdout:\n{}\nStderr:\n{}",
             status_str, output.stdout, output.stderr
         ))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+
+    #[tokio::test]
+    async fn test_tool_manager_file_ops_and_sandbox() {
+        let temp_dir =
+            std::env::temp_dir().join(format!("nexus_tool_test_{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(&temp_dir).unwrap();
+
+        let sandbox = Sandbox::new(&temp_dir, false).unwrap();
+        let manager = ToolManager::new(sandbox);
+
+        // 1. Write file
+        let write_call = ToolCall {
+            id: "call_write".to_string(),
+            name: "write_file".to_string(),
+            arguments: serde_json::json!({
+                "path": "test.txt",
+                "content": "Line 1\nLine 2\nLine 3"
+            }),
+        };
+        let res = manager.execute(&write_call).await;
+        assert!(!res.is_error);
+
+        // 2. Read file
+        let read_call = ToolCall {
+            id: "call_read".to_string(),
+            name: "read_file".to_string(),
+            arguments: serde_json::json!({
+                "path": "test.txt",
+                "start_line": 2,
+                "end_line": 2
+            }),
+        };
+        let res = manager.execute(&read_call).await;
+        assert!(!res.is_error);
+        assert!(res.output.contains("Line 2"));
+
+        // 3. Edit file (exact match)
+        let edit_call = ToolCall {
+            id: "call_edit".to_string(),
+            name: "edit_file".to_string(),
+            arguments: serde_json::json!({
+                "path": "test.txt",
+                "target": "Line 2",
+                "replacement": "Line Two Updated"
+            }),
+        };
+        let res = manager.execute(&edit_call).await;
+        assert!(!res.is_error);
+
+        // 4. Verify updated content
+        let read_updated = manager
+            .execute(&ToolCall {
+                id: "call_read_2".to_string(),
+                name: "read_file".to_string(),
+                arguments: serde_json::json!({ "path": "test.txt" }),
+            })
+            .await;
+        assert!(read_updated.output.contains("Line Two Updated"));
+
+        // 5. Test path traversal block
+        let traversal_call = ToolCall {
+            id: "call_traversal".to_string(),
+            name: "write_file".to_string(),
+            arguments: serde_json::json!({
+                "path": "../../outside.txt",
+                "content": "hacked"
+            }),
+        };
+        let res = manager.execute(&traversal_call).await;
+        assert!(res.is_error);
+        assert!(res.output.contains("Path traversal detected"));
+
+        let _ = fs::remove_dir_all(&temp_dir);
     }
 }

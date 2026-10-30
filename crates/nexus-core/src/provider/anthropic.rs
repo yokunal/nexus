@@ -156,21 +156,25 @@ impl LlmProvider for AnthropicProvider {
                     let delta = &data["delta"];
                     if let Some(text) = delta["text"].as_str() {
                         full_text.push_str(text);
-                        let _ = event_tx.send(NexusEvent::TokenChunk(text.to_string())).await;
+                        let _ = event_tx
+                            .send(NexusEvent::TokenChunk(text.to_string()))
+                            .await;
                     } else if let Some(json_partial) = delta["partial_json"].as_str() {
                         current_tool_json.push_str(json_partial);
                     }
                 }
                 "content_block_stop" => {
                     if !current_tool_name.is_empty() {
-                        let parsed_args = serde_json::from_str(&current_tool_json)
-                            .unwrap_or(json!({}));
+                        let parsed_args =
+                            serde_json::from_str(&current_tool_json).unwrap_or(json!({}));
                         let call = ToolCall {
                             id: current_tool_id.clone(),
                             name: current_tool_name.clone(),
                             arguments: parsed_args,
                         };
-                        let _ = event_tx.send(NexusEvent::ToolCallStarted(call.clone())).await;
+                        let _ = event_tx
+                            .send(NexusEvent::ToolCallStarted(call.clone()))
+                            .await;
                         tool_calls.push(call);
 
                         current_tool_id.clear();
@@ -190,7 +194,11 @@ impl LlmProvider for AnthropicProvider {
         Ok(Message {
             role: "assistant".to_string(),
             content: full_text,
-            tool_calls: if tool_calls.is_empty() { None } else { Some(tool_calls) },
+            tool_calls: if tool_calls.is_empty() {
+                None
+            } else {
+                Some(tool_calls)
+            },
             tool_results: None,
             timestamp: Utc::now(),
         })

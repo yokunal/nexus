@@ -72,7 +72,10 @@ mod tests {
 
         // Target matches twice -> Must fail with AmbiguousMatch!
         let result = safe_replace(&temp_file, "let x = 10;", "let x = 20;");
-        assert!(matches!(result, Err(EditError::AmbiguousMatch { occurrences: 2, .. })));
+        assert!(matches!(
+            result,
+            Err(EditError::AmbiguousMatch { occurrences: 2, .. })
+        ));
 
         // Target with unique context -> Must succeed!
         let unique_target = "fn main() {\n    let x = 10;";

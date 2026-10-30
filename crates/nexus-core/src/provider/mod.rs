@@ -1,8 +1,8 @@
 pub mod anthropic;
 
-use async_trait::async_trait;
 use crate::events::NexusEvent;
 use crate::session::Message;
+use async_trait::async_trait;
 use thiserror::Error;
 use tokio::sync::mpsc::Sender;
 

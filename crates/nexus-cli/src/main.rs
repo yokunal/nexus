@@ -11,7 +11,10 @@ use std::sync::Arc;
 use tokio::sync::mpsc;
 
 #[derive(Parser, Debug)]
-#[command(name = "nexus", about = "Nexus: High-Throughput Polyglot & Rust AI Coding Harness")]
+#[command(
+    name = "nexus",
+    about = "Nexus: High-Throughput Polyglot & Rust AI Coding Harness"
+)]
 struct Cli {
     /// Resume a conversation by UUID
     #[arg(long)]
@@ -136,7 +139,10 @@ Always inspect files before modifying them, and prefer focused edits using `edit
                         io::stdout().flush()?;
                     }
                     NexusEvent::ToolCallStarted(ref call) => {
-                        println!("\n\x1b[1;33m[Tool Call]\x1b[0m {} {:?}", call.name, call.arguments);
+                        println!(
+                            "\n\x1b[1;33m[Tool Call]\x1b[0m {} {:?}",
+                            call.name, call.arguments
+                        );
                     }
                     _ => {}
                 }

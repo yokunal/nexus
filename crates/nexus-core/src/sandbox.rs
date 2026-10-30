@@ -21,7 +21,10 @@ pub struct Sandbox {
 }
 
 impl Sandbox {
-    pub fn new(workspace_root: impl Into<PathBuf>, allow_unrestricted_shell: bool) -> Result<Self, SandboxError> {
+    pub fn new(
+        workspace_root: impl Into<PathBuf>,
+        allow_unrestricted_shell: bool,
+    ) -> Result<Self, SandboxError> {
         let root = workspace_root.into();
         let canonical_root = root.canonicalize().unwrap_or(root);
         Ok(Self {
