@@ -1,3 +1,4 @@
+pub mod cargo_check;
 pub mod edit_file;
 pub mod read_file;
 pub mod run_command;
@@ -20,6 +21,8 @@ pub enum ToolError {
     Edit(#[from] edit_file::EditError),
     #[error("Command error: {0}")]
     Command(#[from] run_command::CommandError),
+    #[error("Cargo check error: {0}")]
+    CargoCheck(#[from] cargo_check::CargoCheckError),
     #[error("Unknown tool: {0}")]
     UnknownTool(String),
     #[error("Invalid arguments: {0}")]
@@ -106,6 +109,20 @@ impl ToolManager {
                     "required": ["command"]
                 }
             }),
+            serde_json::json!({
+                "name": "cargo_check",
+                "description": "Run structured cargo check, clippy, or test on the Rust workspace, returning parsed compiler diagnostics and borrow-checker tutor advice.",
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "mode": {
+                            "type": "string",
+                            "enum": ["check", "clippy", "test"],
+                            "description": "Check mode to run: 'check' (default), 'clippy', or 'test'."
+                        }
+                    }
+                }
+            }),
         ]
     }
 
@@ -116,6 +133,7 @@ impl ToolManager {
             "write_file" => self.handle_write(call).await,
             "edit_file" => self.handle_edit(call).await,
             "run_command" => self.handle_command(call).await,
+            "cargo_check" => self.handle_cargo_check(call).await,
             other => Err(ToolError::UnknownTool(other.to_string())),
         };
 
@@ -201,6 +219,13 @@ impl ToolManager {
             status_str, output.stdout, output.stderr
         ))
     }
+
+    async fn handle_cargo_check(&self, call: &ToolCall) -> Result<String, ToolError> {
+        let mode_str = call.arguments["mode"].as_str();
+        let report =
+            cargo_check::execute_cargo_check(self.sandbox.workspace_root(), mode_str).await?;
+        Ok(report)
+    }
 }
 
 #[cfg(test)]
@@ -280,5 +305,29 @@ mod tests {
         assert!(res.output.contains("Path traversal detected"));
 
         let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_cargo_check_tool_execution() {
+        // Run cargo check on current workspace
+        let workspace = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap()
+            .to_path_buf();
+
+        let sandbox = Sandbox::new(&workspace, false).unwrap();
+        let manager = ToolManager::new(sandbox);
+
+        let check_call = ToolCall {
+            id: "call_check".to_string(),
+            name: "cargo_check".to_string(),
+            arguments: serde_json::json!({ "mode": "check" }),
+        };
+
+        let res = manager.execute(&check_call).await;
+        assert!(!res.is_error);
+        assert!(res.output.contains("Rust Check Passed") || res.output.contains("Diagnostic"));
     }
 }
