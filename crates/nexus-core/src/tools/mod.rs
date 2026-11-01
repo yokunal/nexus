@@ -1,6 +1,7 @@
 pub mod cargo_check;
 pub mod edit_file;
 pub mod lsp;
+pub mod memory;
 pub mod rea;
 pub mod read_file;
 pub mod run_command;
@@ -34,6 +35,8 @@ pub enum ToolError {
     Skill(#[from] crate::skills::SkillError),
     #[error("REA error: {0}")]
     Rea(#[from] crate::rea::ReaError),
+    #[error("Memory error: {0}")]
+    Memory(#[from] crate::memory::MemoryError),
     #[error("Unknown tool: {0}")]
     UnknownTool(String),
     #[error("Invalid arguments: {0}")]
@@ -58,6 +61,8 @@ pub struct ToolResult {
 pub struct ToolManager {
     sandbox: Sandbox,
     lsp_client: Option<Arc<Mutex<nexus_lsp::LspClient>>>,
+    memory_store: Option<crate::memory::MemoryStore>,
+    session_id: String,
 }
 
 impl ToolManager {
@@ -65,11 +70,23 @@ impl ToolManager {
         Self {
             sandbox,
             lsp_client: None,
+            memory_store: None,
+            session_id: String::new(),
         }
     }
 
     pub fn with_lsp_client(mut self, client: Arc<Mutex<nexus_lsp::LspClient>>) -> Self {
         self.lsp_client = Some(client);
+        self
+    }
+
+    pub fn with_memory_store(
+        mut self,
+        store: crate::memory::MemoryStore,
+        session_id: &str,
+    ) -> Self {
+        self.memory_store = Some(store);
+        self.session_id = session_id.to_string();
         self
     }
 
@@ -217,6 +234,30 @@ impl ToolManager {
                     "required": ["path"]
                 }
             }),
+            serde_json::json!({
+                "name": "search_memory",
+                "description": "Search cross-session distilled memories and past conversation turns using BM25 relevance scoring.",
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "query": { "type": "string", "description": "Search query keywords (e.g. 'borrow checker fix' or 'reqwest rustls')." },
+                        "limit": { "type": "integer", "description": "Maximum number of results to return (default 5)." }
+                    },
+                    "required": ["query"]
+                }
+            }),
+            serde_json::json!({
+                "name": "distill_memory",
+                "description": "Distill and persist a permanent insight, design decision, or bug solution into long-term cross-session memory.",
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "topic": { "type": "string", "description": "Short topic tag (e.g. 'borrow_checker_e0382')." },
+                        "content": { "type": "string", "description": "The distilled takeaway or reusable pattern in markdown." }
+                    },
+                    "required": ["topic", "content"]
+                }
+            }),
         ]
     }
 
@@ -234,6 +275,8 @@ impl ToolManager {
             "synthesize_skill" => self.handle_synthesize_skill(call).await,
             "list_skills" => self.handle_list_skills(call).await,
             "rea_inspect_binary" => self.handle_rea_inspect(call).await,
+            "search_memory" => self.handle_search_memory(call).await,
+            "distill_memory" => self.handle_distill_memory(call).await,
             other => Err(ToolError::UnknownTool(other.to_string())),
         };
 
@@ -430,6 +473,52 @@ impl ToolManager {
 
         let report = rea::execute_rea_inspect(&full_path, mode)?;
         Ok(report)
+    }
+
+    async fn handle_search_memory(&self, call: &ToolCall) -> Result<String, ToolError> {
+        let store = self.memory_store.as_ref().ok_or_else(|| {
+            ToolError::InvalidArguments("Memory store is not initialized".to_string())
+        })?;
+        let query = call.arguments["query"]
+            .as_str()
+            .ok_or_else(|| ToolError::InvalidArguments("Missing 'query'".to_string()))?;
+        let limit = call.arguments["limit"].as_u64().unwrap_or(5) as usize;
+
+        let results = memory::execute_search_memory(store, query, limit)?;
+        if results.is_empty() {
+            return Ok(format!("No matching memories found for query: '{}'", query));
+        }
+
+        let mut out = format!("Found {} relevant memory results:\n", results.len());
+        for (i, r) in results.iter().enumerate() {
+            out.push_str(&format!(
+                "{}. [{}] {} (score: {:.2})\n   {}\n",
+                i + 1,
+                r.source.to_uppercase(),
+                r.topic_or_role,
+                r.score,
+                r.snippet
+            ));
+        }
+        Ok(out)
+    }
+
+    async fn handle_distill_memory(&self, call: &ToolCall) -> Result<String, ToolError> {
+        let store = self.memory_store.as_ref().ok_or_else(|| {
+            ToolError::InvalidArguments("Memory store is not initialized".to_string())
+        })?;
+        let topic = call.arguments["topic"]
+            .as_str()
+            .ok_or_else(|| ToolError::InvalidArguments("Missing 'topic'".to_string()))?;
+        let content = call.arguments["content"]
+            .as_str()
+            .ok_or_else(|| ToolError::InvalidArguments("Missing 'content'".to_string()))?;
+
+        let mem = memory::execute_distill_memory(store, &self.session_id, topic, content)?;
+        Ok(format!(
+            "Successfully distilled memory '{}' (id: {}) into long-term store.",
+            mem.topic, mem.id
+        ))
     }
 }
 

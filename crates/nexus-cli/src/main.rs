@@ -2,6 +2,7 @@ use clap::Parser;
 use nexus_core::events::NexusEvent;
 use nexus_core::git::GitSnapshotManager;
 use nexus_core::gstack::{GStackEngine, GStackReviewMode};
+use nexus_core::memory::MemoryStore;
 use nexus_core::provider::anthropic::AnthropicProvider;
 use nexus_core::provider::LlmProvider;
 use nexus_core::rea::ReaBridge;
@@ -39,6 +40,10 @@ struct Cli {
     /// Automatically approve all tool execution requests
     #[arg(long)]
     dangerously_skip_permissions: bool,
+
+    /// Search cross-session memory and exit
+    #[arg(short = 's', long)]
+    search: Option<String>,
 }
 
 #[tokio::main]
@@ -49,9 +54,51 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .workspace
         .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
 
+    // Initialize session database in the workspace root (.nexus/sessions.db)
+    let nexus_dir = workspace_dir.join(".nexus");
+    std::fs::create_dir_all(&nexus_dir)?;
+    let session_store = SessionStore::new(nexus_dir.join("sessions.db"))?;
+
+    // Initialize cross-session distilled memory store
+    let memory_store = MemoryStore::open(&nexus_dir.join("memory.db"))?;
+
+    // Handle immediate search CLI flag
+    if let Some(query) = cli.search {
+        println!(
+            "\x1b[1;36m[Memory Recall]\x1b[0m Searching cross-session memory for: '{}'",
+            query
+        );
+        let results = memory_store.search(&query, 10)?;
+        if results.is_empty() {
+            println!("No matching historical memories found.");
+        } else {
+            println!("Found {} relevant historical records:\n", results.len());
+            for (i, r) in results.iter().enumerate() {
+                println!(
+                    "{}. \x1b[1;33m[{}]\x1b[0m \x1b[1m{}\x1b[0m (score: {:.2})\n   {}\n",
+                    i + 1,
+                    r.source.to_uppercase(),
+                    r.topic_or_role,
+                    r.score,
+                    r.snippet
+                );
+            }
+        }
+        return Ok(());
+    }
+
+    // Determine session ID
+    let mut session = if let Some(id) = cli.conversation {
+        println!("Resuming session: {}", id);
+        session_store.load_session(&id)?
+    } else {
+        session_store.create_session("Nexus CLI Session")?
+    };
+
     // Initialize security sandbox
     let sandbox = Sandbox::new(&workspace_dir, cli.dangerously_skip_permissions)?;
-    let mut tool_manager_builder = ToolManager::new(sandbox.clone());
+    let mut tool_manager_builder =
+        ToolManager::new(sandbox.clone()).with_memory_store(memory_store.clone(), &session.id);
 
     // Auto-connect rust-analyzer if a Rust workspace exists
     if workspace_dir.join("Cargo.toml").exists() {
@@ -62,19 +109,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
     let tool_manager = Arc::new(tool_manager_builder);
-
-    // Initialize session database in the workspace root (.nexus/sessions.db)
-    let nexus_dir = workspace_dir.join(".nexus");
-    std::fs::create_dir_all(&nexus_dir)?;
-    let session_store = SessionStore::new(nexus_dir.join("sessions.db"))?;
-
-    // Determine session ID
-    let mut session = if let Some(id) = cli.conversation {
-        println!("Resuming session: {}", id);
-        session_store.load_session(&id)?
-    } else {
-        session_store.create_session("Nexus CLI Session")?
-    };
 
     // Initialize dynamic Skill Watcher
     let (skill_tx, mut skill_rx) = mpsc::channel(16);
@@ -142,15 +176,20 @@ Always inspect files before modifying them, and prefer focused edits using `edit
         // Handle slash commands
         if trimmed == "/help" {
             println!("\x1b[1;33mAvailable Commands:\x1b[0m");
-            println!("  /ceo            - Run CEO review (challenge assumptions, evaluate 10-star product & scope)");
-            println!("  /eng            - Run Engineering architecture review (invariants, data flow, failure modes)");
-            println!("  /qa             - Run automated QA loop (check, test, fix, re-verify)");
-            println!("  /ship           - Run pre-landing ship verification (clean tree, clippy, test gate)");
-            println!("  /skills         - List all loaded permanent and staged skills");
-            println!("  /promote <name> - Promote a staged skill to permanent storage");
-            println!("  /discard <name> - Discard a staged skill from sandbox quarantine");
-            println!("  /rea <path>     - Inspect a native binary via REA CLI");
-            println!("  exit            - Exit Nexus");
+            println!("  /ceo                    - Run CEO review (challenge assumptions, evaluate 10-star product & scope)");
+            println!("  /eng                    - Run Engineering architecture review (invariants, data flow, failure modes)");
+            println!(
+                "  /qa                     - Run automated QA loop (check, test, fix, re-verify)"
+            );
+            println!("  /ship                   - Run pre-landing ship verification (clean tree, clippy, test gate)");
+            println!("  /skills                 - List all loaded permanent and staged skills");
+            println!("  /promote <name>         - Promote a staged skill to permanent storage");
+            println!("  /discard <name>         - Discard a staged skill from sandbox quarantine");
+            println!("  /recall <query>         - Search past sessions and distilled memory cards");
+            println!("  /remember <topic>: <msg>- Save a distilled insight into long-term memory");
+            println!("  /bench-memory           - Benchmark memory search throughput and microsecond latency");
+            println!("  /rea <path>             - Inspect a native binary via REA CLI");
+            println!("  exit                    - Exit Nexus");
             continue;
         }
 
@@ -200,6 +239,64 @@ Always inspect files before modifying them, and prefer focused edits using `edit
                 Err(err) => {
                     eprintln!("\x1b[1;31m[Error discarding skill]\x1b[0m {}", err);
                 }
+            }
+            continue;
+        }
+
+        if let Some(rest) = trimmed.strip_prefix("/recall ") {
+            let query = rest.trim();
+            match memory_store.search(query, 5) {
+                Ok(results) => {
+                    if results.is_empty() {
+                        println!("No matching historical memories found for '{}'.", query);
+                    } else {
+                        println!("\x1b[1;36mFound {} memory results:\x1b[0m", results.len());
+                        for (i, r) in results.iter().enumerate() {
+                            println!(
+                                "{}. \x1b[1;33m[{}]\x1b[0m \x1b[1m{}\x1b[0m (score: {:.2})\n   {}\n",
+                                i + 1,
+                                r.source.to_uppercase(),
+                                r.topic_or_role,
+                                r.score,
+                                r.snippet
+                            );
+                        }
+                    }
+                }
+                Err(err) => eprintln!("\x1b[1;31m[Memory Search Error]\x1b[0m {}", err),
+            }
+            continue;
+        }
+
+        if let Some(rest) = trimmed.strip_prefix("/remember ") {
+            let parts: Vec<&str> = rest.splitn(2, ':').collect();
+            if parts.len() == 2 {
+                let topic = parts[0].trim();
+                let content = parts[1].trim();
+                match memory_store.save_distillation(&session.id, topic, content) {
+                    Ok(mem) => println!(
+                        "\x1b[1;32m[Remembered]\x1b[0m Distilled '{}' into memory (id: {}).",
+                        mem.topic, mem.id
+                    ),
+                    Err(err) => eprintln!("\x1b[1;31m[Memory Save Error]\x1b[0m {}", err),
+                }
+            } else {
+                println!("Usage: /remember <topic>: <distilled insight note>");
+            }
+            continue;
+        }
+
+        if trimmed == "/bench-memory" {
+            let sample_queries = ["borrow checker", "lsp client", "prompt caching", "sandbox"];
+            match memory_store.benchmark_search_throughput(&sample_queries) {
+                Ok(report) => {
+                    println!("\x1b[1;36m[Memory Benchmark Report]\x1b[0m");
+                    println!("  Total Queries: {}", report.total_queries);
+                    println!("  Total Duration: {} µs", report.total_duration_micros);
+                    println!("  Average Latency: {:.2} µs", report.avg_latency_micros);
+                    println!("  P99 Latency: {:.2} µs", report.p99_latency_micros);
+                }
+                Err(err) => eprintln!("\x1b[1;31m[Benchmark Error]\x1b[0m {}", err),
             }
             continue;
         }
@@ -266,7 +363,7 @@ Always inspect files before modifying them, and prefer focused edits using `edit
             other => other,
         };
 
-        // Add user message to session
+        // Add user message to session and index in memory
         let user_msg = Message {
             role: "user".to_string(),
             content: prompt_to_send.to_string(),
@@ -276,6 +373,7 @@ Always inspect files before modifying them, and prefer focused edits using `edit
         };
         session.messages.push(user_msg.clone());
         let _ = session_store.save_message(&session.id, &user_msg);
+        let _ = memory_store.index_turn(&session.id, "user", &user_msg.content, user_msg.timestamp);
 
         // Turn loop: stream model response, execute tools, repeat until model finishes
         let mut turn_active = true;
@@ -327,6 +425,12 @@ Always inspect files before modifying them, and prefer focused edits using `edit
 
             session.messages.push(assistant_msg.clone());
             let _ = session_store.save_message(&session.id, &assistant_msg);
+            let _ = memory_store.index_turn(
+                &session.id,
+                "assistant",
+                &assistant_msg.content,
+                assistant_msg.timestamp,
+            );
 
             // Execute tools if requested
             if let Some(calls) = &assistant_msg.tool_calls {

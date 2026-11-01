@@ -1,6 +1,7 @@
 pub mod events;
 pub mod git;
 pub mod gstack;
+pub mod memory;
 pub mod provider;
 pub mod rea;
 pub mod rust_specialist;
@@ -12,6 +13,7 @@ pub mod tools;
 pub use events::NexusEvent;
 pub use git::{GitSnapshotManager, TurnSnapshot};
 pub use gstack::{ArchitectureInvariants, GStackEngine, GStackReviewMode};
+pub use memory::{BenchmarkReport, DistilledMemory, MemoryError, MemorySearchResult, MemoryStore};
 pub use rea::{ReaBridge, ReaError};
 pub use rust_specialist::{BorrowTutor, CheckMode, CheckResult, RustCheckRunner, RustDiagnostic};
 pub use sandbox::Sandbox;
