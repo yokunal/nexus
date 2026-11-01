@@ -24,3 +24,10 @@ ratatui = "0.29"
 crossterm = { version = "0.28", features = ["event-stream"] }
 async-trait = "0.1"
 notify = "6.1"
+
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+strip = true

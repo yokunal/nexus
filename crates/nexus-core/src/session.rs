@@ -48,9 +48,11 @@ impl SessionStore {
 
     fn connect(&self) -> Result<Connection, SessionError> {
         let conn = Connection::open(&self.db_path)?;
-        // Enable WAL mode for concurrency and microsecond read/write speed
+        // Enable WAL mode for concurrency and tune cache to 256KB to keep memory ultra-lean
         conn.pragma_update(None, "journal_mode", "WAL")?;
         conn.pragma_update(None, "synchronous", "NORMAL")?;
+        conn.pragma_update(None, "cache_size", -256)?;
+        conn.pragma_update(None, "mmap_size", 0)?;
         Ok(conn)
     }
 

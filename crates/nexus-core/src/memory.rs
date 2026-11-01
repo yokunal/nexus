@@ -69,6 +69,8 @@ impl MemoryStore {
             "PRAGMA journal_mode = WAL;
              PRAGMA synchronous = NORMAL;
              PRAGMA foreign_keys = ON;
+             PRAGMA cache_size = -256;
+             PRAGMA mmap_size = 0;
              
              CREATE TABLE IF NOT EXISTS distilled_memories (
                  id TEXT PRIMARY KEY,
