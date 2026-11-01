@@ -1,8 +1,10 @@
 pub mod cargo_check;
 pub mod edit_file;
 pub mod lsp;
+pub mod rea;
 pub mod read_file;
 pub mod run_command;
+pub mod skill;
 pub mod write_file;
 
 use crate::sandbox::{Sandbox, SandboxError};
@@ -28,6 +30,10 @@ pub enum ToolError {
     CargoCheck(#[from] cargo_check::CargoCheckError),
     #[error("LSP error: {0}")]
     Lsp(#[from] lsp::ToolLspError),
+    #[error("Skill error: {0}")]
+    Skill(#[from] crate::skills::SkillError),
+    #[error("REA error: {0}")]
+    Rea(#[from] crate::rea::ReaError),
     #[error("Unknown tool: {0}")]
     UnknownTool(String),
     #[error("Invalid arguments: {0}")]
@@ -174,6 +180,43 @@ impl ToolManager {
                     "required": ["path"]
                 }
             }),
+            serde_json::json!({
+                "name": "synthesize_skill",
+                "description": "Create and stage a new specialized AI skill in the quarantined staging folder (.nexus/staging/skills/<name>/SKILL.md) for immediate test-drive.",
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "name": { "type": "string", "description": "Skill name in kebab-case (e.g. 'benchmark-runner')." },
+                        "description": { "type": "string", "description": "Short 1-line description of what this skill does." },
+                        "instructions": { "type": "string", "description": "Detailed instructions, workflows, and guidelines in markdown." }
+                    },
+                    "required": ["name", "description", "instructions"]
+                }
+            }),
+            serde_json::json!({
+                "name": "list_skills",
+                "description": "List all active permanent and staged skills loaded in the workspace.",
+                "input_schema": {
+                    "type": "object",
+                    "properties": {}
+                }
+            }),
+            serde_json::json!({
+                "name": "rea_inspect_binary",
+                "description": "Inspect an ELF/Mach-O/PE binary using the opt-in REA (Reverse Engineer Anything) CLI.",
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "path": { "type": "string", "description": "Path to binary file." },
+                        "mode": {
+                            "type": "string",
+                            "enum": ["overview", "objdump", "version"],
+                            "description": "Inspection mode: 'overview' for summary, 'objdump' for disassembly, or 'version'."
+                        }
+                    },
+                    "required": ["path"]
+                }
+            }),
         ]
     }
 
@@ -188,6 +231,9 @@ impl ToolManager {
             "lsp_hover" => self.handle_lsp_hover(call).await,
             "lsp_definition" => self.handle_lsp_definition(call).await,
             "lsp_symbols" => self.handle_lsp_symbols(call).await,
+            "synthesize_skill" => self.handle_synthesize_skill(call).await,
+            "list_skills" => self.handle_list_skills(call).await,
+            "rea_inspect_binary" => self.handle_rea_inspect(call).await,
             other => Err(ToolError::UnknownTool(other.to_string())),
         };
 
@@ -328,6 +374,61 @@ impl ToolManager {
         let full_path = self.sandbox.resolve_path(path_str)?;
 
         let report = lsp::execute_symbols(self.lsp_client.as_ref(), &full_path).await?;
+        Ok(report)
+    }
+
+    async fn handle_synthesize_skill(&self, call: &ToolCall) -> Result<String, ToolError> {
+        let name = call.arguments["name"]
+            .as_str()
+            .ok_or_else(|| ToolError::InvalidArguments("Missing 'name'".to_string()))?;
+        let description = call.arguments["description"]
+            .as_str()
+            .ok_or_else(|| ToolError::InvalidArguments("Missing 'description'".to_string()))?;
+        let instructions = call.arguments["instructions"]
+            .as_str()
+            .ok_or_else(|| ToolError::InvalidArguments("Missing 'instructions'".to_string()))?;
+
+        let skill = skill::execute_synthesize_skill(
+            self.sandbox.workspace_root(),
+            name,
+            description,
+            instructions,
+        )?;
+
+        Ok(format!(
+            "Successfully synthesized skill '{}' into quarantine staging at '{}'. You can now test-drive this workflow or run '/promote {}' to make it permanent.",
+            skill.name,
+            skill.path.display(),
+            skill.name
+        ))
+    }
+
+    async fn handle_list_skills(&self, _call: &ToolCall) -> Result<String, ToolError> {
+        let skills = skill::execute_list_skills(self.sandbox.workspace_root())?;
+        if skills.is_empty() {
+            return Ok("No specialized skills currently installed in workspace.".to_string());
+        }
+
+        let mut out = String::from("Loaded Skills:\n");
+        for s in skills {
+            let status = if s.is_staged {
+                "[STAGED TEST-DRIVE]"
+            } else {
+                "[ACTIVE]"
+            };
+            out.push_str(&format!("- {} {}: {}\n", s.name, status, s.description));
+        }
+        Ok(out)
+    }
+
+    async fn handle_rea_inspect(&self, call: &ToolCall) -> Result<String, ToolError> {
+        let path_str = call.arguments["path"]
+            .as_str()
+            .ok_or_else(|| ToolError::InvalidArguments("Missing 'path'".to_string()))?;
+        let mode = call.arguments["mode"].as_str().unwrap_or("overview");
+        let full_path = self.sandbox.resolve_path(path_str)?;
+
+        let report = rea::execute_rea_inspect(&full_path, mode)?;
         Ok(report)
     }
 }

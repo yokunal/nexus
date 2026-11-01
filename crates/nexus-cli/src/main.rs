@@ -4,11 +4,13 @@ use nexus_core::git::GitSnapshotManager;
 use nexus_core::gstack::{GStackEngine, GStackReviewMode};
 use nexus_core::provider::anthropic::AnthropicProvider;
 use nexus_core::provider::LlmProvider;
+use nexus_core::rea::ReaBridge;
 use nexus_core::sandbox::Sandbox;
 use nexus_core::session::{Message, SessionStore};
+use nexus_core::skills::{SkillManager, SkillWatcher};
 use nexus_core::tools::ToolManager;
 use std::io::{self, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::sync::mpsc;
 
@@ -74,10 +76,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         session_store.create_session("Nexus CLI Session")?
     };
 
+    // Initialize dynamic Skill Watcher
+    let (skill_tx, mut skill_rx) = mpsc::channel(16);
+    let _skill_watcher = SkillWatcher::start(&workspace_dir, skill_tx).ok();
+
     println!("\x1b[1;36m====================================================\x1b[0m");
     println!("\x1b[1;36m  Nexus: The Polyglot & Rust AI Coding Harness      \x1b[0m");
     println!("\x1b[1;36m  Workspace: {}\x1b[0m", workspace_dir.display());
     println!("\x1b[1;36m  Session ID: {}\x1b[0m", session.id);
+    if ReaBridge::is_available() {
+        println!("\x1b[1;32m  REA Plugin: Enabled (Recon & Decompilation ready)\x1b[0m");
+    }
     println!("\x1b[1;36m====================================================\x1b[0m\n");
 
     let api_key = std::env::var("ANTHROPIC_API_KEY").unwrap_or_else(|_| {
@@ -104,6 +113,14 @@ Always inspect files before modifying them, and prefer focused edits using `edit
     );
 
     loop {
+        // Non-blocking check for hotloaded skill notifications
+        while let Ok(change) = skill_rx.try_recv() {
+            println!(
+                "\x1b[1;36m[Hotload Watcher]\x1b[0m Skill filesystem change detected: {:?}",
+                change
+            );
+        }
+
         print!("\x1b[1;32mnexus>\x1b[0m ");
         io::stdout().flush()?;
 
@@ -123,19 +140,97 @@ Always inspect files before modifying them, and prefer focused edits using `edit
         }
 
         // Handle slash commands
-        let mut active_system_prompt = base_system_prompt.clone();
-        let prompt_to_send = match trimmed {
-            "/help" => {
-                println!("\x1b[1;33mAvailable Commands:\x1b[0m");
-                println!("  /ceo   - Run CEO review (challenge assumptions, evaluate 10-star product & scope)");
-                println!("  /eng   - Run Engineering architecture review (invariants, data flow, failure modes)");
-                println!("  /qa    - Run automated QA loop (check, test, fix, re-verify)");
-                println!(
-                    "  /ship  - Run pre-landing ship verification (clean tree, clippy, test gate)"
-                );
-                println!("  exit   - Exit Nexus");
+        if trimmed == "/help" {
+            println!("\x1b[1;33mAvailable Commands:\x1b[0m");
+            println!("  /ceo            - Run CEO review (challenge assumptions, evaluate 10-star product & scope)");
+            println!("  /eng            - Run Engineering architecture review (invariants, data flow, failure modes)");
+            println!("  /qa             - Run automated QA loop (check, test, fix, re-verify)");
+            println!("  /ship           - Run pre-landing ship verification (clean tree, clippy, test gate)");
+            println!("  /skills         - List all loaded permanent and staged skills");
+            println!("  /promote <name> - Promote a staged skill to permanent storage");
+            println!("  /discard <name> - Discard a staged skill from sandbox quarantine");
+            println!("  /rea <path>     - Inspect a native binary via REA CLI");
+            println!("  exit            - Exit Nexus");
+            continue;
+        }
+
+        if trimmed == "/skills" {
+            let loaded = SkillManager::load_all(&workspace_dir).unwrap_or_default();
+            if loaded.is_empty() {
+                println!("\x1b[0;33mNo specialized skills installed in workspace.\x1b[0m");
+            } else {
+                println!("\x1b[1;36mActive Workspace Skills:\x1b[0m");
+                for s in loaded {
+                    let status = if s.is_staged {
+                        "\x1b[1;33m[STAGED TEST-DRIVE]\x1b[0m"
+                    } else {
+                        "\x1b[1;32m[PERMANENT]\x1b[0m"
+                    };
+                    println!("  - \x1b[1m{}\x1b[0m {}: {}", s.name, status, s.description);
+                }
+            }
+            continue;
+        }
+
+        if let Some(rest) = trimmed.strip_prefix("/promote ") {
+            let skill_name = rest.trim();
+            match SkillManager::promote_skill(&workspace_dir, skill_name) {
+                Ok(_) => {
+                    println!(
+                        "\x1b[1;32m[Promoted]\x1b[0m Skill '{}' moved to permanent storage (.nexus/skills/{}).",
+                        skill_name, skill_name
+                    );
+                }
+                Err(err) => {
+                    eprintln!("\x1b[1;31m[Error promoting skill]\x1b[0m {}", err);
+                }
+            }
+            continue;
+        }
+
+        if let Some(rest) = trimmed.strip_prefix("/discard ") {
+            let skill_name = rest.trim();
+            match SkillManager::discard_skill(&workspace_dir, skill_name) {
+                Ok(_) => {
+                    println!(
+                        "\x1b[1;33m[Discarded]\x1b[0m Staged skill '{}' removed from quarantine.",
+                        skill_name
+                    );
+                }
+                Err(err) => {
+                    eprintln!("\x1b[1;31m[Error discarding skill]\x1b[0m {}", err);
+                }
+            }
+            continue;
+        }
+
+        if let Some(rest) = trimmed.strip_prefix("/rea ") {
+            let parts: Vec<&str> = rest.split_whitespace().collect();
+            if parts.is_empty() {
+                println!("Usage: /rea <binary-path> [overview|objdump|version]");
                 continue;
             }
+            let target_bin = Path::new(parts[0]);
+            let mode = parts.get(1).copied().unwrap_or("overview");
+            match ReaBridge::inspect_binary(target_bin, mode) {
+                Ok(out) => println!("\x1b[1;34m[REA Output]\x1b[0m\n{}", out),
+                Err(err) => eprintln!("\x1b[1;31m[REA Error]\x1b[0m {}", err),
+            }
+            continue;
+        }
+
+        let mut active_system_prompt = base_system_prompt.clone();
+
+        // Inject active skills into prompt dynamically
+        if let Ok(skills) = SkillManager::load_all(&workspace_dir) {
+            let skills_prompt = SkillManager::format_skills_prompt(&skills);
+            if !skills_prompt.is_empty() {
+                active_system_prompt.push_str("\n\n");
+                active_system_prompt.push_str(&skills_prompt);
+            }
+        }
+
+        let prompt_to_send = match trimmed {
             "/ceo" => {
                 println!("\x1b[1;35m[gstack]\x1b[0m Activating CEO Review Mode");
                 active_system_prompt.push_str("\n\n");
