@@ -16,3 +16,4 @@ rusqlite = { workspace = true }
 reqwest = { workspace = true }
 eventsource-stream = { workspace = true }
 async-trait = { workspace = true }
+nexus-lsp = { path = "../nexus-lsp" }

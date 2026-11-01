@@ -45,10 +45,14 @@ impl LlmProvider for AnthropicProvider {
         let mut headers = HeaderMap::new();
         headers.insert("x-api-key", HeaderValue::from_str(&self.api_key).unwrap());
         headers.insert("anthropic-version", HeaderValue::from_static("2023-06-01"));
+        headers.insert(
+            "anthropic-beta",
+            HeaderValue::from_static("prompt-caching-2024-07-31"),
+        );
         headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
 
         // Format messages for Anthropic API
-        let formatted_messages: Vec<serde_json::Value> = history
+        let mut formatted_messages: Vec<serde_json::Value> = history
             .iter()
             .map(|m| {
                 if let Some(tool_results) = &m.tool_results {
@@ -98,16 +102,51 @@ impl LlmProvider for AnthropicProvider {
             })
             .collect();
 
+        // Attach ephemeral prompt cache breakpoint to the last message if history is present
+        if let Some(last_msg) = formatted_messages.last_mut() {
+            if let Some(content_arr) = last_msg.get_mut("content").and_then(|c| c.as_array_mut()) {
+                if let Some(last_block) = content_arr.last_mut() {
+                    if let Some(obj) = last_block.as_object_mut() {
+                        obj.insert("cache_control".to_string(), json!({ "type": "ephemeral" }));
+                    }
+                }
+            } else if let Some(content_str) = last_msg.get("content").and_then(|c| c.as_str()) {
+                last_msg["content"] = json!([
+                    {
+                        "type": "text",
+                        "text": content_str,
+                        "cache_control": { "type": "ephemeral" }
+                    }
+                ]);
+            }
+        }
+
+        // Ephemeral caching on system prompt block
+        let system_block = json!([
+            {
+                "type": "text",
+                "text": system_prompt,
+                "cache_control": { "type": "ephemeral" }
+            }
+        ]);
+
         let mut body = json!({
             "model": self.model,
             "max_tokens": 4096,
-            "system": system_prompt,
+            "system": system_block,
             "messages": formatted_messages,
             "stream": true,
         });
 
+        // Ephemeral caching on the tools definitions (cache on the last tool)
         if !tools.is_empty() {
-            body["tools"] = json!(tools);
+            let mut cached_tools = tools.to_vec();
+            if let Some(last_tool) = cached_tools.last_mut() {
+                if let Some(obj) = last_tool.as_object_mut() {
+                    obj.insert("cache_control".to_string(), json!({ "type": "ephemeral" }));
+                }
+            }
+            body["tools"] = json!(cached_tools);
         }
 
         let response = self

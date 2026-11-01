@@ -21,3 +21,4 @@ ratatui = { workspace = true }
 crossterm = { workspace = true }
 uuid = { workspace = true }
 chrono = { workspace = true }
+nexus-lsp = { path = "../nexus-lsp" }

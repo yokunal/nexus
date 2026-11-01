@@ -47,7 +47,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Initialize security sandbox
     let sandbox = Sandbox::new(&workspace_dir, cli.dangerously_skip_permissions)?;
-    let tool_manager = Arc::new(ToolManager::new(sandbox.clone()));
+    let mut tool_manager_builder = ToolManager::new(sandbox.clone());
+
+    // Auto-connect rust-analyzer if a Rust workspace exists
+    if workspace_dir.join("Cargo.toml").exists() {
+        if let Ok(client) = nexus_lsp::LspClient::start("rust-analyzer", &workspace_dir).await {
+            println!("\x1b[1;32m[LSP]\x1b[0m Connected to rust-analyzer");
+            tool_manager_builder =
+                tool_manager_builder.with_lsp_client(Arc::new(tokio::sync::Mutex::new(client)));
+        }
+    }
+    let tool_manager = Arc::new(tool_manager_builder);
 
     // Initialize session database in the workspace root (.nexus/sessions.db)
     let nexus_dir = workspace_dir.join(".nexus");

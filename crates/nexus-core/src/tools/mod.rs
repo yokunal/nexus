@@ -1,13 +1,16 @@
 pub mod cargo_check;
 pub mod edit_file;
+pub mod lsp;
 pub mod read_file;
 pub mod run_command;
 pub mod write_file;
 
 use crate::sandbox::{Sandbox, SandboxError};
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 use std::time::Duration;
 use thiserror::Error;
+use tokio::sync::Mutex;
 
 #[derive(Error, Debug)]
 pub enum ToolError {
@@ -23,6 +26,8 @@ pub enum ToolError {
     Command(#[from] run_command::CommandError),
     #[error("Cargo check error: {0}")]
     CargoCheck(#[from] cargo_check::CargoCheckError),
+    #[error("LSP error: {0}")]
+    Lsp(#[from] lsp::ToolLspError),
     #[error("Unknown tool: {0}")]
     UnknownTool(String),
     #[error("Invalid arguments: {0}")]
@@ -46,11 +51,20 @@ pub struct ToolResult {
 #[derive(Clone)]
 pub struct ToolManager {
     sandbox: Sandbox,
+    lsp_client: Option<Arc<Mutex<nexus_lsp::LspClient>>>,
 }
 
 impl ToolManager {
     pub fn new(sandbox: Sandbox) -> Self {
-        Self { sandbox }
+        Self {
+            sandbox,
+            lsp_client: None,
+        }
+    }
+
+    pub fn with_lsp_client(mut self, client: Arc<Mutex<nexus_lsp::LspClient>>) -> Self {
+        self.lsp_client = Some(client);
+        self
     }
 
     pub fn sandbox(&self) -> &Sandbox {
@@ -123,6 +137,43 @@ impl ToolManager {
                     }
                 }
             }),
+            serde_json::json!({
+                "name": "lsp_hover",
+                "description": "Inspect type signatures, return types, and docstrings of a symbol in a file using the language server (e.g. rust-analyzer).",
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "path": { "type": "string", "description": "Relative path to the file." },
+                        "line": { "type": "integer", "description": "Line number (1-based)." },
+                        "column": { "type": "integer", "description": "Column number (0-based)." }
+                    },
+                    "required": ["path", "line", "column"]
+                }
+            }),
+            serde_json::json!({
+                "name": "lsp_definition",
+                "description": "Find where a symbol, function, struct, or trait is defined in the workspace.",
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "path": { "type": "string", "description": "Relative path to the file." },
+                        "line": { "type": "integer", "description": "Line number (1-based)." },
+                        "column": { "type": "integer", "description": "Column number (0-based)." }
+                    },
+                    "required": ["path", "line", "column"]
+                }
+            }),
+            serde_json::json!({
+                "name": "lsp_symbols",
+                "description": "Get an outline of all symbols (functions, structs, traits, enums, modules) declared in a source file.",
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "path": { "type": "string", "description": "Relative path to the file." }
+                    },
+                    "required": ["path"]
+                }
+            }),
         ]
     }
 
@@ -134,6 +185,9 @@ impl ToolManager {
             "edit_file" => self.handle_edit(call).await,
             "run_command" => self.handle_command(call).await,
             "cargo_check" => self.handle_cargo_check(call).await,
+            "lsp_hover" => self.handle_lsp_hover(call).await,
+            "lsp_definition" => self.handle_lsp_definition(call).await,
+            "lsp_symbols" => self.handle_lsp_symbols(call).await,
             other => Err(ToolError::UnknownTool(other.to_string())),
         };
 
@@ -224,6 +278,53 @@ impl ToolManager {
         let mode_str = call.arguments["mode"].as_str();
         let report =
             cargo_check::execute_cargo_check(self.sandbox.workspace_root(), mode_str).await?;
+        Ok(report)
+    }
+
+    async fn handle_lsp_hover(&self, call: &ToolCall) -> Result<String, ToolError> {
+        let path_str = call.arguments["path"]
+            .as_str()
+            .ok_or_else(|| ToolError::InvalidArguments("Missing 'path'".to_string()))?;
+        let line = call.arguments["line"]
+            .as_u64()
+            .ok_or_else(|| ToolError::InvalidArguments("Missing 'line'".to_string()))?
+            as u32;
+        let col = call.arguments["column"]
+            .as_u64()
+            .ok_or_else(|| ToolError::InvalidArguments("Missing 'column'".to_string()))?
+            as u32;
+        let full_path = self.sandbox.resolve_path(path_str)?;
+
+        let report = lsp::execute_hover(self.lsp_client.as_ref(), &full_path, line, col).await?;
+        Ok(report)
+    }
+
+    async fn handle_lsp_definition(&self, call: &ToolCall) -> Result<String, ToolError> {
+        let path_str = call.arguments["path"]
+            .as_str()
+            .ok_or_else(|| ToolError::InvalidArguments("Missing 'path'".to_string()))?;
+        let line = call.arguments["line"]
+            .as_u64()
+            .ok_or_else(|| ToolError::InvalidArguments("Missing 'line'".to_string()))?
+            as u32;
+        let col = call.arguments["column"]
+            .as_u64()
+            .ok_or_else(|| ToolError::InvalidArguments("Missing 'column'".to_string()))?
+            as u32;
+        let full_path = self.sandbox.resolve_path(path_str)?;
+
+        let report =
+            lsp::execute_definition(self.lsp_client.as_ref(), &full_path, line, col).await?;
+        Ok(report)
+    }
+
+    async fn handle_lsp_symbols(&self, call: &ToolCall) -> Result<String, ToolError> {
+        let path_str = call.arguments["path"]
+            .as_str()
+            .ok_or_else(|| ToolError::InvalidArguments("Missing 'path'".to_string()))?;
+        let full_path = self.sandbox.resolve_path(path_str)?;
+
+        let report = lsp::execute_symbols(self.lsp_client.as_ref(), &full_path).await?;
         Ok(report)
     }
 }
@@ -329,5 +430,27 @@ mod tests {
         let res = manager.execute(&check_call).await;
         assert!(!res.is_error);
         assert!(res.output.contains("Rust Check Passed") || res.output.contains("Diagnostic"));
+    }
+
+    #[tokio::test]
+    async fn test_lsp_tools_graceful_fallback() {
+        let temp_dir =
+            std::env::temp_dir().join(format!("nexus_lsp_test_{}", uuid::Uuid::new_v4()));
+        let sandbox = Sandbox::new(&temp_dir, false).unwrap();
+        let manager = ToolManager::new(sandbox); // No LSP client attached
+
+        let hover_call = ToolCall {
+            id: "call_hover".to_string(),
+            name: "lsp_hover".to_string(),
+            arguments: serde_json::json!({
+                "path": "src/main.rs",
+                "line": 1,
+                "column": 1
+            }),
+        };
+
+        let res = manager.execute(&hover_call).await;
+        assert!(res.is_error);
+        assert!(res.output.contains("rust-analyzer is not active"));
     }
 }
