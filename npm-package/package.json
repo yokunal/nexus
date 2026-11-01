@@ -1,0 +1,30 @@
+{
+  "name": "nexus-harness",
+  "version": "0.1.0",
+  "description": "High-Throughput Polyglot & Rust AI Coding Harness",
+  "main": "bin/nexus.js",
+  "bin": {
+    "nexus": "bin/nexus.js"
+  },
+  "files": [
+    "bin",
+    "binaries"
+  ],
+  "scripts": {
+    "start": "node bin/nexus.js"
+  },
+  "engines": {
+    "node": ">=16.0.0"
+  },
+  "keywords": [
+    "ai",
+    "coding",
+    "agent",
+    "rust",
+    "harness",
+    "polyglot",
+    "claude"
+  ],
+  "author": "yokunal",
+  "license": "MIT"
+}

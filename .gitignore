@@ -6,3 +6,5 @@
 *.log
 .env
 **/*.rs.bk
+*.tgz
+npm-package/binaries/
