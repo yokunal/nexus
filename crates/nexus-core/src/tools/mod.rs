@@ -247,8 +247,11 @@ impl ToolManager {
             .ok_or_else(|| ToolError::InvalidArguments("Missing 'replacement'".to_string()))?;
         let full_path = self.sandbox.resolve_path(path_str)?;
 
-        edit_file::safe_replace(&full_path, target, replacement)?;
-        Ok(format!("Successfully edited {}", path_str))
+        let report = edit_file::safe_replace(&full_path, target, replacement)?;
+        Ok(format!(
+            "Successfully edited {} via {:?} (lines {}-{})",
+            path_str, report.tier, report.start_line, report.end_line
+        ))
     }
 
     async fn handle_command(&self, call: &ToolCall) -> Result<String, ToolError> {

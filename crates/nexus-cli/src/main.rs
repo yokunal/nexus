@@ -1,5 +1,7 @@
 use clap::Parser;
 use nexus_core::events::NexusEvent;
+use nexus_core::git::GitSnapshotManager;
+use nexus_core::gstack::{GStackEngine, GStackReviewMode};
 use nexus_core::provider::anthropic::AnthropicProvider;
 use nexus_core::provider::LlmProvider;
 use nexus_core::sandbox::Sandbox;
@@ -86,12 +88,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let provider = Arc::new(AnthropicProvider::new(api_key, Some(cli.model)));
     let tool_defs = ToolManager::tool_definitions();
 
-    let system_prompt = format!(
+    // Load architecture invariants from AGENTS.md (or default standards)
+    let invariants = GStackEngine::load_invariants(&workspace_dir);
+    let invariants_prompt = GStackEngine::format_architecture_prompt(&invariants);
+
+    let base_system_prompt = format!(
         "You are Nexus, a world-class AI coding assistant.
 You specialize in writing clean, modular, and robust software with an emphasis on idiomatic Rust and clean architecture.
 Your workspace is at: {}.
-Always inspect files before modifying them, and prefer focused edits using `edit_file` over overwriting entire files.",
-        workspace_dir.display()
+Always inspect files before modifying them, and prefer focused edits using `edit_file` over overwriting entire files.
+
+{}",
+        workspace_dir.display(),
+        invariants_prompt
     );
 
     loop {
@@ -113,10 +122,59 @@ Always inspect files before modifying them, and prefer focused edits using `edit
             break;
         }
 
+        // Handle slash commands
+        let mut active_system_prompt = base_system_prompt.clone();
+        let prompt_to_send = match trimmed {
+            "/help" => {
+                println!("\x1b[1;33mAvailable Commands:\x1b[0m");
+                println!("  /ceo   - Run CEO review (challenge assumptions, evaluate 10-star product & scope)");
+                println!("  /eng   - Run Engineering architecture review (invariants, data flow, failure modes)");
+                println!("  /qa    - Run automated QA loop (check, test, fix, re-verify)");
+                println!(
+                    "  /ship  - Run pre-landing ship verification (clean tree, clippy, test gate)"
+                );
+                println!("  exit   - Exit Nexus");
+                continue;
+            }
+            "/ceo" => {
+                println!("\x1b[1;35m[gstack]\x1b[0m Activating CEO Review Mode");
+                active_system_prompt.push_str("\n\n");
+                active_system_prompt.push_str(&GStackEngine::format_review_prompt(
+                    GStackReviewMode::CeoReview,
+                ));
+                "Review the current project and plan from the CEO perspective: challenge premises, define the 10-star product, and recommend scope posture."
+            }
+            "/eng" => {
+                println!("\x1b[1;35m[gstack]\x1b[0m Activating Engineering Review Mode");
+                active_system_prompt.push_str("\n\n");
+                active_system_prompt.push_str(&GStackEngine::format_review_prompt(
+                    GStackReviewMode::EngReview,
+                ));
+                "Perform an engineering architecture review: audit single sources of truth, interface contracts, error domains, and failure recovery."
+            }
+            "/qa" => {
+                println!("\x1b[1;35m[gstack]\x1b[0m Activating QA Loop Mode");
+                active_system_prompt.push_str("\n\n");
+                active_system_prompt.push_str(&GStackEngine::format_review_prompt(
+                    GStackReviewMode::QaLoop,
+                ));
+                "Run test suites and compiler checks, identify any failures, patch them atomically via edit_file, and re-verify until 100% green."
+            }
+            "/ship" => {
+                println!("\x1b[1;35m[gstack]\x1b[0m Activating Ship Mode");
+                active_system_prompt.push_str("\n\n");
+                active_system_prompt.push_str(&GStackEngine::format_review_prompt(
+                    GStackReviewMode::ShipReview,
+                ));
+                "Perform pre-landing verification: check git status, test coverage, clippy warnings, and docs/changelog."
+            }
+            other => other,
+        };
+
         // Add user message to session
         let user_msg = Message {
             role: "user".to_string(),
-            content: trimmed.to_string(),
+            content: prompt_to_send.to_string(),
             tool_calls: None,
             tool_results: None,
             timestamp: chrono::Utc::now(),
@@ -126,10 +184,15 @@ Always inspect files before modifying them, and prefer focused edits using `edit
 
         // Turn loop: stream model response, execute tools, repeat until model finishes
         let mut turn_active = true;
+        let mut turn_counter = 0;
+
         while turn_active {
+            turn_counter += 1;
+            let turn_id = format!("{}-turn-{}", session.id, turn_counter);
+
             let (tx, mut rx) = mpsc::channel(64);
             let provider_clone = provider.clone();
-            let sys_clone = system_prompt.clone();
+            let sys_clone = active_system_prompt.clone();
             let history_clone = session.messages.clone();
             let tools_clone = tool_defs.clone();
 
@@ -172,6 +235,17 @@ Always inspect files before modifying them, and prefer focused edits using `edit
 
             // Execute tools if requested
             if let Some(calls) = &assistant_msg.tool_calls {
+                // Compass: 1 git snapshot per agent turn before executing modifying tools
+                if let Ok(Some(snapshot)) =
+                    GitSnapshotManager::create_turn_snapshot(&workspace_dir, &turn_id)
+                {
+                    println!(
+                        "\x1b[0;32m[Git Snapshot]\x1b[0m Ref: {} (dirty worktree: {})",
+                        &snapshot.commit_or_stash_sha[..8.min(snapshot.commit_or_stash_sha.len())],
+                        snapshot.had_uncommitted_changes
+                    );
+                }
+
                 let mut results = Vec::new();
                 for call in calls {
                     println!("\x1b[1;34m[Executing]\x1b[0m {}", call.name);
