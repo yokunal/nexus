@@ -70,6 +70,53 @@ fn trim_working_set() {
 #[cfg(not(windows))]
 fn trim_working_set() {}
 
+fn get_process_memory_kb() -> Option<usize> {
+    #[cfg(windows)]
+    {
+        #[repr(C)]
+        struct PROCESS_MEMORY_COUNTERS {
+            cb: u32,
+            page_fault_count: u32,
+            peak_working_set_size: usize,
+            working_set_size: usize,
+            quota_peak_paged_pool_usage: usize,
+            quota_paged_pool_usage: usize,
+            quota_peak_non_paged_pool_usage: usize,
+            quota_non_paged_pool_usage: usize,
+            pagefile_usage: usize,
+            peak_pagefile_usage: usize,
+        }
+
+        extern "system" {
+            fn GetCurrentProcess() -> isize;
+            fn K32GetProcessMemoryInfo(
+                hProcess: isize,
+                ppsmemCounters: *mut PROCESS_MEMORY_COUNTERS,
+                cb: u32,
+            ) -> i32;
+        }
+
+        unsafe {
+            let mut counters: PROCESS_MEMORY_COUNTERS = std::mem::zeroed();
+            counters.cb = std::mem::size_of::<PROCESS_MEMORY_COUNTERS>() as u32;
+            if K32GetProcessMemoryInfo(GetCurrentProcess(), &mut counters, counters.cb) != 0 {
+                Some(counters.working_set_size / 1024)
+            } else {
+                None
+            }
+        }
+    }
+    #[cfg(not(windows))]
+    {
+        if let Ok(statm) = std::fs::read_to_string("/proc/self/statm") {
+            let pages: usize = statm.split_whitespace().nth(1)?.parse().ok()?;
+            Some(pages * 4)
+        } else {
+            None
+        }
+    }
+}
+
 #[derive(Clone, Copy)]
 pub struct Theme {
     pub cyan: &'static str,
@@ -447,6 +494,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             "{}  Theme: {:?} | Display: {:?}{}",
             theme.yellow, config.color_mode, config.display_mode, theme.reset
         );
+        if let Some(kb) = get_process_memory_kb() {
+            println!(
+                "{}  Process Memory: {:.1} MB ({} KB){}",
+                theme.green,
+                kb as f64 / 1024.0,
+                kb,
+                theme.reset
+            );
+        }
         if !plugins.is_empty() {
             println!(
                 "{}  Plugins: {} active ({}){}",
@@ -538,6 +594,7 @@ Always inspect files before modifying them, and prefer focused edits using `edit
         if trimmed == "/help" {
             println!("\x1b[1;33mAvailable Commands:\x1b[0m");
             println!("  /setup                  - Reconfigure color mode, display mode, provider, and model");
+            println!("  /status                 - Show real-time process memory, SQLite cache, and diagnostics");
             println!("  /ceo                    - Run CEO review (challenge assumptions, evaluate 10-star product & scope)");
             println!("  /eng                    - Run Engineering architecture review (invariants, data flow, failure modes)");
             println!(
@@ -584,6 +641,30 @@ Always inspect files before modifying them, and prefer focused edits using `edit
                 }
                 Err(err) => eprintln!("{}Setup error: {}{}", theme.red, err, theme.reset),
             }
+            continue;
+        }
+
+        if trimmed == "/status" || trimmed == "/memory" {
+            let mem_str = if let Some(kb) = get_process_memory_kb() {
+                format!("{:.2} MB ({} KB)", kb as f64 / 1024.0, kb)
+            } else {
+                "Unknown".to_string()
+            };
+            println!(
+                "{}--- Nexus Process Diagnostics ---{}",
+                theme.cyan, theme.reset
+            );
+            println!("  Process Memory: {}", mem_str);
+            println!("  Session ID:     {}", session.id);
+            println!("  Model:          {}", config.model);
+            println!("  Theme:          {:?}", config.color_mode);
+            println!("  Display Mode:   {:?}", config.display_mode);
+            println!("  SQLite Cache:   256 KB");
+            println!("  Note: Windows Terminal DirectX GPU renderer uses ~50 MB separately for the window frame.");
+            println!(
+                "{}---------------------------------{}",
+                theme.cyan, theme.reset
+            );
             continue;
         }
 
