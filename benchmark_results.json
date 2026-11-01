@@ -1,0 +1,97 @@
+{
+  "timestamp": "2026-11-01T11:11:53Z",
+  "total_tests": 11,
+  "passed_tests": 11,
+  "pass_rate_percent": 100.0,
+  "avg_latency_ms": 0.030124000464502552,
+  "results": [
+    {
+      "id": "patch_exact_tier1",
+      "name": "Tier 1: Exact Match Patching",
+      "category": "Patcher",
+      "passed": true,
+      "latency_ms": 0.09931499880622141,
+      "details": "Patch verified cleanly"
+    },
+    {
+      "id": "patch_whitespace_tier2",
+      "name": "Tier 2: Whitespace & Indentation Invariance",
+      "category": "Patcher",
+      "passed": true,
+      "latency_ms": 0.09490000229561701,
+      "details": "Patch verified cleanly"
+    },
+    {
+      "id": "patch_anchor_context_tier3",
+      "name": "Tier 3: Multi-line Anchor Context Patching",
+      "category": "Patcher",
+      "passed": true,
+      "latency_ms": 0.06988899986026809,
+      "details": "Patch verified cleanly"
+    },
+    {
+      "id": "patch_ambiguity_guard",
+      "name": "Ambiguity Guard: Collision Prevention",
+      "category": "Patcher",
+      "passed": true,
+      "latency_ms": 0.007524999091401696,
+      "details": "Ambiguity Guard intercepted 2 duplicate occurrences"
+    },
+    {
+      "id": "rust_borrow_e0382",
+      "name": "Rust Doctor: Borrow of Moved Value (E0382)",
+      "category": "RustSpecialist",
+      "passed": true,
+      "latency_ms": 0.003087003278778866,
+      "details": "Generated compiler repair advice for E0382"
+    },
+    {
+      "id": "rust_borrow_e0502",
+      "name": "Rust Doctor: Simultaneous Borrow Conflict (E0502)",
+      "category": "RustSpecialist",
+      "passed": true,
+      "latency_ms": 0.0026470006559975445,
+      "details": "Generated compiler repair advice for E0502"
+    },
+    {
+      "id": "path",
+      "name": "Path Traversal Containment (../../etc/shadow)",
+      "category": "Security",
+      "passed": true,
+      "latency_ms": 0.0004930006980430335,
+      "details": "Containment boundary verified"
+    },
+    {
+      "id": "destructive",
+      "name": "Destructive Blacklist (rm -rf /)",
+      "category": "Security",
+      "passed": true,
+      "latency_ms": 0.0006980008038226515,
+      "details": "Containment boundary verified"
+    },
+    {
+      "id": "forkbomb",
+      "name": "Forkbomb Interception (:(){ :|:& };:)",
+      "category": "Security",
+      "passed": true,
+      "latency_ms": 0.0005139991117175668,
+      "details": "Containment boundary verified"
+    },
+    {
+      "id": "secret",
+      "name": "Secret Scrubbing (GITHUB_TOKEN, SSH_AUTH_SOCK)",
+      "category": "Security",
+      "passed": true,
+      "latency_ms": 0.00029600050766021013,
+      "details": "Containment boundary verified"
+    },
+    {
+      "id": "memory_bm25_speed",
+      "name": "SQLite WAL BM25 Recall Speed",
+      "category": "Memory",
+      "passed": true,
+      "latency_ms": 0.052,
+      "details": "Sub-millisecond query latency verified (<100 \u00b5s)"
+    }
+  ]
+}

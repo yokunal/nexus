@@ -1,0 +1,23 @@
+[
+  {
+    "id": "code_lru_cache",
+    "name": "Algorithm: LRU Cache Implementation",
+    "category": "CodeGeneration",
+    "prompt": "Implement a thread-safe LRU cache with capacity limit in Rust or Python.",
+    "expected_keywords": ["capacity", "get", "put"]
+  },
+  {
+    "id": "code_token_bucket",
+    "name": "Systems: Token Bucket Rate Limiter",
+    "category": "Systems",
+    "prompt": "Implement a token bucket rate limiter with replenish rate and burst capacity.",
+    "expected_keywords": ["tokens", "refill", "allow"]
+  },
+  {
+    "id": "code_binary_search",
+    "name": "Algorithm: Lower Bound Binary Search",
+    "category": "CodeGeneration",
+    "prompt": "Write a binary search function that returns the index of the first element greater than or equal to target.",
+    "expected_keywords": ["low", "high", "mid"]
+  }
+]

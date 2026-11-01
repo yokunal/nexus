@@ -1,0 +1,38 @@
+[
+  {
+    "id": "patch_exact_tier1",
+    "name": "Tier 1: Exact Match Patching",
+    "category": "Patcher",
+    "initial_code": "fn calculate_total(price: f64, tax_rate: f64) -> f64 {\n    price * (1.0 + tax_rate)\n}\n",
+    "target": "    price * (1.0 + tax_rate)",
+    "replacement": "    let base = price * (1.0 + tax_rate);\n    (base * 100.0).round() / 100.0",
+    "expected_substring": "(base * 100.0).round() / 100.0"
+  },
+  {
+    "id": "patch_whitespace_tier2",
+    "name": "Tier 2: Whitespace & Indentation Invariance",
+    "category": "Patcher",
+    "initial_code": "class OrderProcessor:\n        def process(self, order_id):\n                status = fetch_status(order_id)\n                return status\n",
+    "target": "    def process(self, order_id):\n        status = fetch_status(order_id)\n        return status",
+    "replacement": "    def process(self, order_id):\n        status = fetch_status(order_id)\n        return status.upper()",
+    "expected_substring": "status.upper()"
+  },
+  {
+    "id": "patch_anchor_context_tier3",
+    "name": "Tier 3: Multi-line Anchor Context Patching",
+    "category": "Patcher",
+    "initial_code": "function executePipeline() {\n    // Setup stage\n    initBuffers();\n    configureSockets();\n    // Teardown stage\n    cleanup();\n}\n",
+    "target": "function executePipeline() {\n    initBuffers();\n    configureSockets();\n    cleanup();\n}",
+    "replacement": "function executePipeline() {\n    initSecureBuffers();\n    configureSockets();\n    cleanup();\n}",
+    "expected_substring": "initSecureBuffers()"
+  },
+  {
+    "id": "patch_ambiguity_guard",
+    "name": "Ambiguity Guard: Collision Prevention",
+    "category": "Patcher",
+    "initial_code": "let count = 0;\nlet count = 0;\n",
+    "target": "let count = 0;",
+    "replacement": "let count = 1;",
+    "expected_error": "AmbiguousMatch"
+  }
+]

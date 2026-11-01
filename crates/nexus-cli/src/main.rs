@@ -607,6 +607,7 @@ Always inspect files before modifying them, and prefer focused edits using `edit
             println!("  /recall <query>         - Search past sessions and distilled memory cards");
             println!("  /remember <topic>: <msg>- Save a distilled insight into long-term memory");
             println!("  /bench-memory           - Benchmark memory search throughput and microsecond latency");
+            println!("  /benchmark              - Run local air-gapped industry benchmark battery");
             println!("  /rea <path>             - Inspect a native binary via REA CLI");
             println!("  /plugins                - List active plugins and registered plugin slash commands");
             println!("  exit                    - Exit Nexus");
@@ -790,6 +791,37 @@ Always inspect files before modifying them, and prefer focused edits using `edit
                     println!("  P99 Latency: {:.2} µs", report.p99_latency_micros);
                 }
                 Err(err) => eprintln!("\x1b[1;31m[Benchmark Error]\x1b[0m {}", err),
+            }
+            continue;
+        }
+
+        if trimmed == "/benchmark" || trimmed == "/bench" {
+            println!("\x1b[1;36m[Benchmark Runner]\x1b[0m Executing local air-gapped industry benchmark battery...");
+            let py_cmd = if cfg!(windows) { "python" } else { "python3" };
+            let bench_script = workspace_dir.join("benchmarks").join("run_benchmarks.py");
+            let script_path = if bench_script.exists() {
+                bench_script
+            } else {
+                Path::new("benchmarks/run_benchmarks.py").to_path_buf()
+            };
+
+            let status = std::process::Command::new(py_cmd)
+                .arg(&script_path)
+                .current_dir(&workspace_dir)
+                .status();
+
+            match status {
+                Ok(s) => {
+                    if s.success() {
+                        println!("\x1b[1;32m[Benchmark Complete]\x1b[0m Report generated: BENCHMARK_REPORT.md");
+                    } else {
+                        eprintln!("\x1b[1;31m[Benchmark Failed]\x1b[0m Non-zero exit code: {:?}", s.code());
+                    }
+                }
+                Err(err) => {
+                    eprintln!("\x1b[1;31m[Benchmark Runner Error]\x1b[0m Failed to spawn {}: {}", py_cmd, err);
+                    println!("Tip: Run directly via: {} benchmarks/run_benchmarks.py", py_cmd);
+                }
             }
             continue;
         }

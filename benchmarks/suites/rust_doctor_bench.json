@@ -1,0 +1,18 @@
+[
+  {
+    "id": "rust_borrow_e0382",
+    "name": "Rust Doctor: Borrow of Moved Value (E0382)",
+    "category": "RustSpecialist",
+    "diagnostic_code": "E0382",
+    "error_message": "use of moved value: `s`",
+    "expected_advice_substring": "Use of Moved Value"
+  },
+  {
+    "id": "rust_borrow_e0502",
+    "name": "Rust Doctor: Simultaneous Borrow Conflict (E0502)",
+    "category": "RustSpecialist",
+    "diagnostic_code": "E0502",
+    "error_message": "cannot borrow `vec` as mutable because it is also borrowed as immutable",
+    "expected_advice_substring": "Simultaneous Mutable & Immutable Borrows"
+  }
+]
