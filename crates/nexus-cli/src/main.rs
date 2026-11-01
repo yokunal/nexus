@@ -121,14 +121,60 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     if ReaBridge::is_available() {
         println!("\x1b[1;32m  REA Plugin: Enabled (Recon & Decompilation ready)\x1b[0m");
     }
+
+    // 1. Check environment variables
+    let mut api_key = std::env::var("ANTHROPIC_API_KEY")
+        .or_else(|_| std::env::var("ANTHROPIC_AUTH_TOKEN"))
+        .ok();
+    let mut base_url = std::env::var("ANTHROPIC_BASE_URL").ok();
+    let mut active_model = cli.model;
+
+    // 2. Fallback to Claude Code settings (~/.claude/settings.json) if not set in env
+    if api_key.is_none() {
+        if let Some(home) = std::env::var_os("HOME") {
+            let claude_settings = PathBuf::from(home).join(".claude").join("settings.json");
+            if claude_settings.exists() {
+                if let Ok(content) = std::fs::read_to_string(&claude_settings) {
+                    if let Ok(val) = serde_json::from_str::<serde_json::Value>(&content) {
+                        if let Some(env_obj) = val.get("env") {
+                            if api_key.is_none() {
+                                if let Some(token) =
+                                    env_obj.get("ANTHROPIC_AUTH_TOKEN").and_then(|v| v.as_str())
+                                {
+                                    api_key = Some(token.to_string());
+                                }
+                            }
+                            if base_url.is_none() {
+                                if let Some(b) =
+                                    env_obj.get("ANTHROPIC_BASE_URL").and_then(|v| v.as_str())
+                                {
+                                    base_url = Some(b.to_string());
+                                }
+                            }
+                            if active_model == "claude-3-7-sonnet-20250219" {
+                                if let Some(m) =
+                                    env_obj.get("ANTHROPIC_MODEL").and_then(|v| v.as_str())
+                                {
+                                    active_model = m.to_string();
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    let final_key = api_key.unwrap_or_else(|| "DUMMY_KEY_FOR_LOCAL_TEST".to_string());
+    let mut provider_builder = AnthropicProvider::new(final_key, Some(active_model.clone()));
+    if let Some(ref b) = base_url {
+        println!("\x1b[1;32m  Endpoint: {}\x1b[0m", b);
+        provider_builder = provider_builder.with_base_url(b.clone());
+    }
+    println!("\x1b[1;32m  Active Model: {}\x1b[0m", active_model);
     println!("\x1b[1;36m====================================================\x1b[0m\n");
 
-    let api_key = std::env::var("ANTHROPIC_API_KEY").unwrap_or_else(|_| {
-        // Fallback placeholder for dry-run if no key is set yet
-        "DUMMY_KEY_FOR_LOCAL_TEST".to_string()
-    });
-
-    let provider = Arc::new(AnthropicProvider::new(api_key, Some(cli.model)));
+    let provider = Arc::new(provider_builder);
     let tool_defs = ToolManager::tool_definitions();
 
     // Load architecture invariants from AGENTS.md (or default standards)

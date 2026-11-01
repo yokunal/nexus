@@ -43,7 +43,12 @@ impl LlmProvider for AnthropicProvider {
         event_tx: Sender<NexusEvent>,
     ) -> Result<Message, ProviderError> {
         let mut headers = HeaderMap::new();
-        headers.insert("x-api-key", HeaderValue::from_str(&self.api_key).unwrap());
+        if let Ok(key_val) = HeaderValue::from_str(&self.api_key) {
+            headers.insert("x-api-key", key_val);
+        }
+        if let Ok(bearer_val) = HeaderValue::from_str(&format!("Bearer {}", self.api_key)) {
+            headers.insert("authorization", bearer_val);
+        }
         headers.insert("anthropic-version", HeaderValue::from_static("2023-06-01"));
         headers.insert(
             "anthropic-beta",
@@ -149,9 +154,18 @@ impl LlmProvider for AnthropicProvider {
             body["tools"] = json!(cached_tools);
         }
 
+        let base = self.base_url.trim_end_matches('/');
+        let endpoint_url = if base.ends_with("/v1") {
+            format!("{}/messages", base)
+        } else if base.ends_with("/v1/messages") {
+            base.to_string()
+        } else {
+            format!("{}/v1/messages", base)
+        };
+
         let response = self
             .client
-            .post(format!("{}/v1/messages", self.base_url))
+            .post(endpoint_url)
             .headers(headers)
             .json(&body)
             .send()

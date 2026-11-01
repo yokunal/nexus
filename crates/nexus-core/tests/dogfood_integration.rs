@@ -76,11 +76,13 @@ fn test_step2_patcher_and_ambiguity_guard() {
     println!("✓ Tier 2 successfully normalized indentation and patched file");
 
     // 3. Tier 3 Anchor context test
-    let anchor_content = "fn run() {\n    // start trace\n    step_one();\n    step_two();\n    // end trace\n}\n";
+    let anchor_content =
+        "fn run() {\n    // start trace\n    step_one();\n    step_two();\n    // end trace\n}\n";
     fs::write(&temp_file, anchor_content).unwrap();
 
     let anchor_target = "fn run() {\n    step_one();\n    step_two();\n    // end trace\n}";
-    let anchor_replacement = "fn run() {\n    step_one_v2();\n    step_two_v2();\n    // end trace\n}";
+    let anchor_replacement =
+        "fn run() {\n    step_one_v2();\n    step_two_v2();\n    // end trace\n}";
 
     let report3 = safe_replace(&temp_file, anchor_target, anchor_replacement).unwrap();
     assert_eq!(report3.tier, PatchTier::Tier3AnchorContext);
@@ -105,7 +107,10 @@ fn test_step3_security_sandbox_and_quarantine() {
         escape_attempt.is_err(),
         "Path traversal escape must be hard blocked"
     );
-    println!("✓ Path traversal blocked: {:?}", escape_attempt.unwrap_err());
+    println!(
+        "✓ Path traversal blocked: {:?}",
+        escape_attempt.unwrap_err()
+    );
 
     // 2. Destructive blacklist test
     assert!(
@@ -150,7 +155,10 @@ fn test_step4_self_synthesizing_skills() {
 
     assert!(skill.is_staged);
     assert!(skill.path.exists());
-    println!("✓ Skill synthesized into quarantine staging: {}", skill.path.display());
+    println!(
+        "✓ Skill synthesized into quarantine staging: {}",
+        skill.path.display()
+    );
 
     // 2. List skills
     let skills = SkillManager::load_all(&workspace).unwrap();
@@ -215,7 +223,11 @@ fn test_step5_memory_recall_and_benchmark() {
 
     println!("\x1b[1;36m[Benchmark Latency Results]\x1b[0m");
     println!("  Total Queries: {}", report.total_queries);
-    println!("  Average Latency: {:.2} µs ({:.4} ms)", report.avg_latency_micros, report.avg_latency_micros / 1000.0);
+    println!(
+        "  Average Latency: {:.2} µs ({:.4} ms)",
+        report.avg_latency_micros,
+        report.avg_latency_micros / 1000.0
+    );
     println!("  P99 Latency: {:.2} µs", report.p99_latency_micros);
 
     assert!(
