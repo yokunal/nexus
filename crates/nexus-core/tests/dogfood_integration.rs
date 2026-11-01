@@ -5,15 +5,32 @@ use nexus_core::skills::SkillManager;
 use nexus_core::tools::edit_file::{safe_replace, EditError, PatchTier};
 use nexus_core::tools::run_command::{check_destructive_blacklist, get_scrubbed_env};
 use std::fs;
-use std::path::Path;
 use uuid::Uuid;
 
 #[tokio::test]
 async fn test_step1_rust_doctor_auto_tutor() {
     println!("\n\x1b[1;36m=== STEP 1: The Rust Doctor Auto-Tutor ===\x1b[0m");
-    let test_proj = Path::new("/tmp/nexus_dogfood/rust_test_project");
+    let test_proj = std::env::temp_dir().join("nexus_dogfood_rust_test_project");
+    if !test_proj.join("Cargo.toml").exists() {
+        fs::create_dir_all(test_proj.join("src")).unwrap();
+        fs::write(
+            test_proj.join("Cargo.toml"),
+            "[package]\nname = \"rust_test_project\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
+        )
+        .unwrap();
+        fs::write(
+            test_proj.join("src/main.rs"),
+            r#"fn main() {
+    let s = String::from("hello");
+    let s2 = s;
+    println!("{}", s);
+}
+"#,
+        )
+        .unwrap();
+    }
 
-    let result = RustCheckRunner::run_check(test_proj, CheckMode::Check)
+    let result = RustCheckRunner::run_check(&test_proj, CheckMode::Check)
         .await
         .expect("cargo check runner must execute");
 

@@ -3,6 +3,7 @@ use nexus_core::events::NexusEvent;
 use nexus_core::git::GitSnapshotManager;
 use nexus_core::gstack::{GStackEngine, GStackReviewMode};
 use nexus_core::memory::MemoryStore;
+use nexus_core::plugins::PluginManager;
 use nexus_core::provider::anthropic::AnthropicProvider;
 use nexus_core::provider::LlmProvider;
 use nexus_core::rea::ReaBridge;
@@ -172,6 +173,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         provider_builder = provider_builder.with_base_url(b.clone());
     }
     println!("\x1b[1;32m  Active Model: {}\x1b[0m", active_model);
+
+    // Load plugins (workspace .nexus/plugins + Claude Code plugins)
+    let plugins = PluginManager::load_all(&workspace_dir).unwrap_or_default();
+    if !plugins.is_empty() {
+        println!(
+            "\x1b[1;32m  Plugins: {} active ({})\x1b[0m",
+            plugins.len(),
+            plugins
+                .iter()
+                .map(|p| p.name.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
+    }
     println!("\x1b[1;36m====================================================\x1b[0m\n");
 
     let provider = Arc::new(provider_builder);
@@ -180,8 +195,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Load architecture invariants from AGENTS.md (or default standards)
     let invariants = GStackEngine::load_invariants(&workspace_dir);
     let invariants_prompt = GStackEngine::format_architecture_prompt(&invariants);
+    let plugins_prompt = PluginManager::format_plugins_prompt(&plugins);
 
-    let base_system_prompt = format!(
+    let mut base_system_prompt = format!(
         "You are Nexus, a world-class AI coding assistant.
 You specialize in writing clean, modular, and robust software with an emphasis on idiomatic Rust and clean architecture.
 Your workspace is at: {}.
@@ -191,6 +207,11 @@ Always inspect files before modifying them, and prefer focused edits using `edit
         workspace_dir.display(),
         invariants_prompt
     );
+
+    if !plugins_prompt.is_empty() {
+        base_system_prompt.push_str("\n\n");
+        base_system_prompt.push_str(&plugins_prompt);
+    }
 
     loop {
         // Non-blocking check for hotloaded skill notifications
@@ -235,7 +256,38 @@ Always inspect files before modifying them, and prefer focused edits using `edit
             println!("  /remember <topic>: <msg>- Save a distilled insight into long-term memory");
             println!("  /bench-memory           - Benchmark memory search throughput and microsecond latency");
             println!("  /rea <path>             - Inspect a native binary via REA CLI");
+            println!("  /plugins                - List active plugins and registered plugin slash commands");
             println!("  exit                    - Exit Nexus");
+
+            if !plugins.is_empty() {
+                println!("\n\x1b[1;32mRegistered Plugin Slash Commands:\x1b[0m");
+                for p in &plugins {
+                    for c in &p.commands {
+                        println!(
+                            "  /{:<22} - {} (from plugin: {})",
+                            c.name, c.description, p.name
+                        );
+                    }
+                }
+            }
+            continue;
+        }
+
+        if trimmed == "/plugins" {
+            println!("\x1b[1;36mActive Plugins:\x1b[0m");
+            if plugins.is_empty() {
+                println!("\x1b[0;33mNo plugins found in workspace (.nexus/plugins/) or Claude Code cache.\x1b[0m");
+            } else {
+                for p in &plugins {
+                    println!(
+                        "  - \x1b[1m{}\x1b[0m (v{}): {}",
+                        p.name, p.version, p.description
+                    );
+                    for c in &p.commands {
+                        println!("      \x1b[1;32m/{}\x1b[0m: {}", c.name, c.description);
+                    }
+                }
+            }
             continue;
         }
 
@@ -373,14 +425,22 @@ Always inspect files before modifying them, and prefer focused edits using `edit
             }
         }
 
-        let prompt_to_send = match trimmed {
+        let (cmd_word, cmd_arg) = match trimmed.split_once(' ') {
+            Some((w, a)) => (w, Some(a.trim())),
+            None => (trimmed, None),
+        };
+
+        let prompt_to_send: String = match cmd_word {
             "/ceo" => {
                 println!("\x1b[1;35m[gstack]\x1b[0m Activating CEO Review Mode");
                 active_system_prompt.push_str("\n\n");
                 active_system_prompt.push_str(&GStackEngine::format_review_prompt(
                     GStackReviewMode::CeoReview,
                 ));
-                "Review the current project and plan from the CEO perspective: challenge premises, define the 10-star product, and recommend scope posture."
+                match cmd_arg {
+                    Some(arg) if !arg.is_empty() => arg.to_string(),
+                    _ => "Review the current project and plan from the CEO perspective: challenge premises, define the 10-star product, and recommend scope posture.".to_string(),
+                }
             }
             "/eng" => {
                 println!("\x1b[1;35m[gstack]\x1b[0m Activating Engineering Review Mode");
@@ -388,7 +448,10 @@ Always inspect files before modifying them, and prefer focused edits using `edit
                 active_system_prompt.push_str(&GStackEngine::format_review_prompt(
                     GStackReviewMode::EngReview,
                 ));
-                "Perform an engineering architecture review: audit single sources of truth, interface contracts, error domains, and failure recovery."
+                match cmd_arg {
+                    Some(arg) if !arg.is_empty() => arg.to_string(),
+                    _ => "Perform an engineering architecture review: audit single sources of truth, interface contracts, error domains, and failure recovery.".to_string(),
+                }
             }
             "/qa" => {
                 println!("\x1b[1;35m[gstack]\x1b[0m Activating QA Loop Mode");
@@ -396,7 +459,10 @@ Always inspect files before modifying them, and prefer focused edits using `edit
                 active_system_prompt.push_str(&GStackEngine::format_review_prompt(
                     GStackReviewMode::QaLoop,
                 ));
-                "Run test suites and compiler checks, identify any failures, patch them atomically via edit_file, and re-verify until 100% green."
+                match cmd_arg {
+                    Some(arg) if !arg.is_empty() => arg.to_string(),
+                    _ => "Run test suites and compiler checks, identify any failures, patch them atomically via edit_file, and re-verify until 100% green.".to_string(),
+                }
             }
             "/ship" => {
                 println!("\x1b[1;35m[gstack]\x1b[0m Activating Ship Mode");
@@ -404,9 +470,50 @@ Always inspect files before modifying them, and prefer focused edits using `edit
                 active_system_prompt.push_str(&GStackEngine::format_review_prompt(
                     GStackReviewMode::ShipReview,
                 ));
-                "Perform pre-landing verification: check git status, test coverage, clippy warnings, and docs/changelog."
+                match cmd_arg {
+                    Some(arg) if !arg.is_empty() => arg.to_string(),
+                    _ => "Perform pre-landing verification: check git status, test coverage, clippy warnings, and docs/changelog.".to_string(),
+                }
             }
-            other => other,
+            _ => {
+                // Check if cmd_word matches any registered plugin command
+                let matching_plugin_cmd = if let Some(cmd_name) = cmd_word.strip_prefix('/') {
+                    plugins.iter().find_map(|p| {
+                        p.commands
+                            .iter()
+                            .find(|c| c.name == cmd_name)
+                            .map(|c| (p, c))
+                    })
+                } else {
+                    None
+                };
+
+                if let Some((plugin, cmd)) = matching_plugin_cmd {
+                    println!(
+                        "\x1b[1;35m[Plugin: {}]\x1b[0m Activating /{}",
+                        plugin.name, cmd.name
+                    );
+                    active_system_prompt.push_str(&format!(
+                        "\n\n[Active Plugin Command /{}]:\n{}\n",
+                        cmd.name, cmd.prompt
+                    ));
+                    match cmd_arg {
+                        Some(arg) if !arg.is_empty() => arg.to_string(),
+                        _ => format!(
+                            "Activate and execute guidelines for plugin command /{}: {}",
+                            cmd.name, cmd.prompt
+                        ),
+                    }
+                } else if cmd_word.starts_with('/') {
+                    println!(
+                        "\x1b[1;31mUnknown command: {}\x1b[0m Type /help or /plugins to view available commands.",
+                        cmd_word
+                    );
+                    continue;
+                } else {
+                    trimmed.to_string()
+                }
+            }
         };
 
         // Add user message to session and index in memory
