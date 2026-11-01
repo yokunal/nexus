@@ -38,51 +38,41 @@ impl SkillWatcher {
             }
         })?;
 
-        watcher.watch(&nexus_dir, RecursiveMode::Recursive)?;
+        let _ = watcher.watch(&skills_dir, RecursiveMode::Recursive);
+        let _ = watcher.watch(&staging_dir, RecursiveMode::Recursive);
 
-        // Forward and filter events in background task
-        tokio::spawn(async move {
-            let mut last_event_time: Option<tokio::time::Instant> = None;
+        // Forward and filter events in background blocking thread with zero polling overhead
+        tokio::task::spawn_blocking(move || {
+            let mut last_event_time: Option<std::time::Instant> = None;
 
-            loop {
-                // Non-blocking poll from std_rx
-                match std_rx.try_recv() {
-                    Ok(event) => {
-                        let is_skill_md = event.paths.iter().any(|p| {
-                            p.to_string_lossy().contains("SKILL.md")
-                                || p.file_name().and_then(|n| n.to_str()) == Some("SKILL.md")
-                        });
+            while let Ok(event) = std_rx.recv() {
+                let is_skill_md = event.paths.iter().any(|p| {
+                    p.to_string_lossy().contains("SKILL.md")
+                        || p.file_name().and_then(|n| n.to_str()) == Some("SKILL.md")
+                });
 
-                        if is_skill_md {
-                            let now = tokio::time::Instant::now();
-                            let should_fire = match last_event_time {
-                                Some(last) => now.duration_since(last) > Duration::from_millis(50),
-                                None => true,
-                            };
+                if is_skill_md {
+                    let now = std::time::Instant::now();
+                    let should_fire = match last_event_time {
+                        Some(last) => now.duration_since(last) > Duration::from_millis(50),
+                        None => true,
+                    };
 
-                            if should_fire {
-                                last_event_time = Some(now);
-                                let change = match event.kind {
-                                    EventKind::Create(_) => SkillChangeEvent::SkillCreated(
-                                        event.paths.first().cloned().unwrap_or_default(),
-                                    ),
-                                    EventKind::Remove(_) => SkillChangeEvent::SkillRemoved(
-                                        event.paths.first().cloned().unwrap_or_default(),
-                                    ),
-                                    EventKind::Modify(_) => SkillChangeEvent::SkillModified(
-                                        event.paths.first().cloned().unwrap_or_default(),
-                                    ),
-                                    _ => SkillChangeEvent::ReloadRequired,
-                                };
-                                let _ = tx.send(change).await;
-                            }
-                        }
-                    }
-                    Err(std_mpsc::TryRecvError::Empty) => {
-                        tokio::time::sleep(Duration::from_millis(20)).await;
-                    }
-                    Err(std_mpsc::TryRecvError::Disconnected) => {
-                        break;
+                    if should_fire {
+                        last_event_time = Some(now);
+                        let change = match event.kind {
+                            EventKind::Create(_) => SkillChangeEvent::SkillCreated(
+                                event.paths.first().cloned().unwrap_or_default(),
+                            ),
+                            EventKind::Remove(_) => SkillChangeEvent::SkillRemoved(
+                                event.paths.first().cloned().unwrap_or_default(),
+                            ),
+                            EventKind::Modify(_) => SkillChangeEvent::SkillModified(
+                                event.paths.first().cloned().unwrap_or_default(),
+                            ),
+                            _ => SkillChangeEvent::ReloadRequired,
+                        };
+                        let _ = tx.blocking_send(change);
                     }
                 }
             }

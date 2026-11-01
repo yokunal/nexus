@@ -52,6 +52,24 @@ struct Cli {
     setup: bool,
 }
 
+#[cfg(windows)]
+fn trim_working_set() {
+    extern "system" {
+        fn GetCurrentProcess() -> isize;
+        fn SetProcessWorkingSetSize(
+            hProcess: isize,
+            dwMinimumWorkingSetSize: usize,
+            dwMaximumWorkingSetSize: usize,
+        ) -> i32;
+    }
+    unsafe {
+        SetProcessWorkingSetSize(GetCurrentProcess(), usize::MAX, usize::MAX);
+    }
+}
+
+#[cfg(not(windows))]
+fn trim_working_set() {}
+
 #[derive(Clone, Copy)]
 pub struct Theme {
     pub cyan: &'static str,
@@ -497,6 +515,7 @@ Always inspect files before modifying them, and prefer focused edits using `edit
             );
         }
 
+        trim_working_set();
         print!("{}nexus>{} ", theme.green, theme.reset);
         io::stdout().flush()?;
 
