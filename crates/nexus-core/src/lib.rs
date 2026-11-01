@@ -1,3 +1,4 @@
+pub mod config;
 pub mod events;
 pub mod git;
 pub mod gstack;
@@ -11,6 +12,7 @@ pub mod session;
 pub mod skills;
 pub mod tools;
 
+pub use config::{ColorMode, ConfigError, DisplayMode, NexusConfig};
 pub use events::NexusEvent;
 pub use git::{GitSnapshotManager, TurnSnapshot};
 pub use gstack::{ArchitectureInvariants, GStackEngine, GStackReviewMode};

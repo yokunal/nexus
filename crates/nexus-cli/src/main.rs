@@ -1,4 +1,5 @@
 use clap::Parser;
+use nexus_core::config::{ColorMode, DisplayMode, NexusConfig};
 use nexus_core::events::NexusEvent;
 use nexus_core::git::GitSnapshotManager;
 use nexus_core::gstack::{GStackEngine, GStackReviewMode};
@@ -11,7 +12,7 @@ use nexus_core::sandbox::Sandbox;
 use nexus_core::session::{Message, SessionStore};
 use nexus_core::skills::{SkillManager, SkillWatcher};
 use nexus_core::tools::ToolManager;
-use std::io::{self, Write};
+use std::io::{self, BufRead, Write};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::sync::mpsc;
@@ -45,6 +46,248 @@ struct Cli {
     /// Search cross-session memory and exit
     #[arg(short = 's', long)]
     search: Option<String>,
+
+    /// Launch interactive setup wizard (theme, text mode, provider)
+    #[arg(long)]
+    setup: bool,
+}
+
+#[derive(Clone, Copy)]
+pub struct Theme {
+    pub cyan: &'static str,
+    pub green: &'static str,
+    pub yellow: &'static str,
+    pub magenta: &'static str,
+    pub red: &'static str,
+    pub reset: &'static str,
+}
+
+impl Theme {
+    pub fn for_mode(mode: ColorMode) -> Self {
+        match mode {
+            ColorMode::Dark => Self {
+                cyan: "\x1b[1;36m",
+                green: "\x1b[1;32m",
+                yellow: "\x1b[1;33m",
+                magenta: "\x1b[1;35m",
+                red: "\x1b[1;31m",
+                reset: "\x1b[0m",
+            },
+            ColorMode::Light => Self {
+                cyan: "\x1b[0;34m",
+                green: "\x1b[0;32m",
+                yellow: "\x1b[0;33m",
+                magenta: "\x1b[0;35m",
+                red: "\x1b[0;31m",
+                reset: "\x1b[0m",
+            },
+            ColorMode::Plain => Self {
+                cyan: "",
+                green: "",
+                yellow: "",
+                magenta: "",
+                red: "",
+                reset: "",
+            },
+        }
+    }
+}
+
+fn try_import_claude_settings() -> Option<NexusConfig> {
+    let home = std::env::var_os("HOME")
+        .or_else(|| std::env::var_os("USERPROFILE"))
+        .map(PathBuf::from)?;
+    let claude_settings = home.join(".claude").join("settings.json");
+    if claude_settings.exists() {
+        if let Ok(content) = std::fs::read_to_string(&claude_settings) {
+            if let Ok(val) = serde_json::from_str::<serde_json::Value>(&content) {
+                if let Some(env_obj) = val.get("env") {
+                    let token = env_obj
+                        .get("ANTHROPIC_AUTH_TOKEN")
+                        .or_else(|| env_obj.get("ANTHROPIC_API_KEY"))
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .to_string();
+                    let base_url = env_obj
+                        .get("ANTHROPIC_BASE_URL")
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_string());
+                    let model = env_obj
+                        .get("ANTHROPIC_MODEL")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("claude-3-7-sonnet-20250219")
+                        .to_string();
+
+                    if !token.is_empty() {
+                        return Some(NexusConfig {
+                            color_mode: ColorMode::Dark,
+                            display_mode: DisplayMode::Rich,
+                            api_key: token,
+                            base_url,
+                            model,
+                        });
+                    }
+                }
+            }
+        }
+    }
+    None
+}
+
+fn run_setup_wizard() -> io::Result<NexusConfig> {
+    println!("\x1b[1;36m====================================================\x1b[0m");
+    println!("\x1b[1;36m       Welcome to Nexus: Setup & Configuration      \x1b[0m");
+    println!("\x1b[1;36m====================================================\x1b[0m\n");
+
+    let stdin = io::stdin();
+    let mut reader = stdin.lock();
+
+    // 1. Color Mode
+    println!("\x1b[1;33m[1/4] Select Color Mode:\x1b[0m");
+    println!("  1) Dark Mode (Vibrant cyan, yellow, green accents) [Default]");
+    println!("  2) Light Mode (Optimized for light background terminals)");
+    println!("  3) Plain Text / No Color (Clean monochrome)");
+    print!("Choose [1-3] (default 1): ");
+    io::stdout().flush()?;
+    let mut choice = String::new();
+    reader.read_line(&mut choice)?;
+    let color_mode = match choice.trim() {
+        "2" => ColorMode::Light,
+        "3" => ColorMode::Plain,
+        _ => ColorMode::Dark,
+    };
+
+    // 2. Display Mode
+    println!("\n\x1b[1;33m[2/4] Select Display Mode:\x1b[0m");
+    println!("  1) Rich (Syntax highlighting, status chips, formatted banners) [Default]");
+    println!("  2) Minimal (Streamlined, compact output)");
+    print!("Choose [1-2] (default 1): ");
+    io::stdout().flush()?;
+    choice.clear();
+    reader.read_line(&mut choice)?;
+    let display_mode = match choice.trim() {
+        "2" => DisplayMode::Minimal,
+        _ => DisplayMode::Rich,
+    };
+
+    // 3. Provider Selection
+    println!("\n\x1b[1;33m[3/4] Select LLM Provider:\x1b[0m");
+    println!("  1) Auto-import from Claude Code (~/.claude/settings.json) [Recommended]");
+    println!("  2) Anthropic Claude (Direct API Key: sk-ant-...)");
+    println!("  3) Custom Endpoint / Proxy / AI Credits (Base URL + Auth Token)");
+    println!("  4) Local LLM / Ollama (http://localhost:11434/v1)");
+    print!("Choose [1-4] (default 1): ");
+    io::stdout().flush()?;
+    choice.clear();
+    reader.read_line(&mut choice)?;
+
+    let (api_key, base_url, mut default_model) = match choice.trim() {
+        "2" => {
+            print!("\nEnter Anthropic API Key (sk-ant-...): ");
+            io::stdout().flush()?;
+            let mut key_input = String::new();
+            reader.read_line(&mut key_input)?;
+            (
+                key_input.trim().to_string(),
+                None,
+                "claude-3-7-sonnet-20250219".to_string(),
+            )
+        }
+        "3" => {
+            print!(
+                "\nEnter Base URL (e.g. https://api.aicredits.in or https://openrouter.ai/api/v1): "
+            );
+            io::stdout().flush()?;
+            let mut url_input = String::new();
+            reader.read_line(&mut url_input)?;
+            let trimmed_url = url_input.trim();
+            let b_url = if !trimmed_url.is_empty() {
+                Some(trimmed_url.to_string())
+            } else {
+                None
+            };
+
+            print!("Enter Auth Token / API Key: ");
+            io::stdout().flush()?;
+            let mut key_input = String::new();
+            reader.read_line(&mut key_input)?;
+
+            print!(
+                "Enter Default Model (e.g. z-ai/glm-5.3-flash or anthropic/claude-3.5-sonnet): "
+            );
+            io::stdout().flush()?;
+            let mut model_input = String::new();
+            reader.read_line(&mut model_input)?;
+            let trimmed_model = model_input.trim();
+            let model = if !trimmed_model.is_empty() {
+                trimmed_model.to_string()
+            } else {
+                "claude-3-7-sonnet-20250219".to_string()
+            };
+
+            (key_input.trim().to_string(), b_url, model)
+        }
+        "4" => (
+            "ollama".to_string(),
+            Some("http://localhost:11434/v1".to_string()),
+            "qwen2.5-coder:latest".to_string(),
+        ),
+        _ => {
+            if let Some(claude_cfg) = try_import_claude_settings() {
+                println!("\x1b[1;32m✓ Successfully imported credentials from Claude Code!\x1b[0m");
+                (claude_cfg.api_key, claude_cfg.base_url, claude_cfg.model)
+            } else {
+                println!("\x1b[0;33mNo ~/.claude/settings.json found. Please enter your API Key directly:\x1b[0m");
+                print!("Enter API Key: ");
+                io::stdout().flush()?;
+                let mut key_input = String::new();
+                reader.read_line(&mut key_input)?;
+                (
+                    key_input.trim().to_string(),
+                    None,
+                    "claude-3-7-sonnet-20250219".to_string(),
+                )
+            }
+        }
+    };
+
+    if choice.trim() != "3" && choice.trim() != "4" {
+        println!("\n\x1b[1;33m[4/4] Default Model:\x1b[0m");
+        println!("  1) claude-3-7-sonnet-20250219 [Default]");
+        println!("  2) claude-3-5-sonnet-20241022");
+        println!("  3) claude-3-5-haiku-20241022");
+        println!("  4) Custom (enter manually)");
+        print!("Choose [1-4] (default 1): ");
+        io::stdout().flush()?;
+        choice.clear();
+        reader.read_line(&mut choice)?;
+        match choice.trim() {
+            "2" => default_model = "claude-3-5-sonnet-20241022".to_string(),
+            "3" => default_model = "claude-3-5-haiku-20241022".to_string(),
+            "4" => {
+                print!("Enter model name: ");
+                io::stdout().flush()?;
+                let mut m_in = String::new();
+                reader.read_line(&mut m_in)?;
+                if !m_in.trim().is_empty() {
+                    default_model = m_in.trim().to_string();
+                }
+            }
+            _ => {}
+        }
+    }
+
+    let config = NexusConfig {
+        color_mode,
+        display_mode,
+        api_key,
+        base_url,
+        model: default_model,
+    };
+
+    let _ = config.save();
+    println!("\n\x1b[1;32m✓ Setup complete! Configuration saved to ~/.nexus/config.json\x1b[0m\n");
+    Ok(config)
 }
 
 #[tokio::main]
@@ -115,79 +358,114 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let (skill_tx, mut skill_rx) = mpsc::channel(16);
     let _skill_watcher = SkillWatcher::start(&workspace_dir, skill_tx).ok();
 
-    println!("\x1b[1;36m====================================================\x1b[0m");
-    println!("\x1b[1;36m  Nexus: The Polyglot & Rust AI Coding Harness      \x1b[0m");
-    println!("\x1b[1;36m  Workspace: {}\x1b[0m", workspace_dir.display());
-    println!("\x1b[1;36m  Session ID: {}\x1b[0m", session.id);
-    if ReaBridge::is_available() {
-        println!("\x1b[1;32m  REA Plugin: Enabled (Recon & Decompilation ready)\x1b[0m");
-    }
+    // Load or initialize user configuration (Theme, Display Mode, Provider)
+    let mut config = if cli.setup {
+        run_setup_wizard()?
+    } else if let Some(loaded) = NexusConfig::load() {
+        loaded
+    } else {
+        let has_env = std::env::var("ANTHROPIC_API_KEY").is_ok()
+            || std::env::var("ANTHROPIC_AUTH_TOKEN").is_ok();
+        let claude_cfg = try_import_claude_settings();
 
-    // 1. Check environment variables
-    let mut api_key = std::env::var("ANTHROPIC_API_KEY")
-        .or_else(|_| std::env::var("ANTHROPIC_AUTH_TOKEN"))
-        .ok();
-    let mut base_url = std::env::var("ANTHROPIC_BASE_URL").ok();
-    let mut active_model = cli.model;
-
-    // 2. Fallback to Claude Code settings (~/.claude/settings.json) if not set in env
-    if api_key.is_none() {
-        if let Some(home) = std::env::var_os("HOME") {
-            let claude_settings = PathBuf::from(home).join(".claude").join("settings.json");
-            if claude_settings.exists() {
-                if let Ok(content) = std::fs::read_to_string(&claude_settings) {
-                    if let Ok(val) = serde_json::from_str::<serde_json::Value>(&content) {
-                        if let Some(env_obj) = val.get("env") {
-                            if api_key.is_none() {
-                                if let Some(token) =
-                                    env_obj.get("ANTHROPIC_AUTH_TOKEN").and_then(|v| v.as_str())
-                                {
-                                    api_key = Some(token.to_string());
-                                }
-                            }
-                            if base_url.is_none() {
-                                if let Some(b) =
-                                    env_obj.get("ANTHROPIC_BASE_URL").and_then(|v| v.as_str())
-                                {
-                                    base_url = Some(b.to_string());
-                                }
-                            }
-                            if active_model == "claude-3-7-sonnet-20250219" {
-                                if let Some(m) =
-                                    env_obj.get("ANTHROPIC_MODEL").and_then(|v| v.as_str())
-                                {
-                                    active_model = m.to_string();
-                                }
-                            }
-                        }
-                    }
-                }
-            }
+        if !has_env && claude_cfg.is_none() {
+            println!(
+                "\x1b[1;36mNo existing configuration detected. Launching setup wizard...\x1b[0m\n"
+            );
+            run_setup_wizard()?
+        } else if let Some(cfg) = claude_cfg {
+            let _ = cfg.save();
+            cfg
+        } else {
+            NexusConfig::default()
         }
+    };
+
+    // Environment and CLI flag overrides
+    if let Ok(key) =
+        std::env::var("ANTHROPIC_API_KEY").or_else(|_| std::env::var("ANTHROPIC_AUTH_TOKEN"))
+    {
+        config.api_key = key;
+    }
+    if let Ok(url) = std::env::var("ANTHROPIC_BASE_URL") {
+        config.base_url = Some(url);
+    }
+    if cli.model != "claude-3-7-sonnet-20250219" {
+        config.model = cli.model.clone();
     }
 
-    let final_key = api_key.unwrap_or_else(|| "DUMMY_KEY_FOR_LOCAL_TEST".to_string());
-    let mut provider_builder = AnthropicProvider::new(final_key, Some(active_model.clone()));
-    if let Some(ref b) = base_url {
-        println!("\x1b[1;32m  Endpoint: {}\x1b[0m", b);
-        provider_builder = provider_builder.with_base_url(b.clone());
-    }
-    println!("\x1b[1;32m  Active Model: {}\x1b[0m", active_model);
+    let mut theme = Theme::for_mode(config.color_mode);
 
     // Load plugins (workspace .nexus/plugins + Claude Code plugins)
     let plugins = PluginManager::load_all(&workspace_dir).unwrap_or_default();
-    if !plugins.is_empty() {
+
+    if config.display_mode == DisplayMode::Rich {
         println!(
-            "\x1b[1;32m  Plugins: {} active ({})\x1b[0m",
-            plugins.len(),
-            plugins
-                .iter()
-                .map(|p| p.name.as_str())
-                .collect::<Vec<_>>()
-                .join(", ")
+            "{}===================================================={}",
+            theme.cyan, theme.reset
+        );
+        println!(
+            "{}  Nexus: The Polyglot & Rust AI Coding Harness      {}",
+            theme.cyan, theme.reset
+        );
+        println!(
+            "{}  Workspace: {}{}",
+            theme.cyan,
+            workspace_dir.display(),
+            theme.reset
+        );
+        println!("{}  Session ID: {}{}", theme.cyan, session.id, theme.reset);
+        if ReaBridge::is_available() {
+            println!(
+                "{}  REA Plugin: Enabled (Recon & Decompilation ready){}",
+                theme.green, theme.reset
+            );
+        }
+        if let Some(ref b) = config.base_url {
+            println!("{}  Endpoint: {}{}", theme.green, b, theme.reset);
+        }
+        println!(
+            "{}  Active Model: {}{}",
+            theme.green, config.model, theme.reset
+        );
+        println!(
+            "{}  Theme: {:?} | Display: {:?}{}",
+            theme.yellow, config.color_mode, config.display_mode, theme.reset
+        );
+        if !plugins.is_empty() {
+            println!(
+                "{}  Plugins: {} active ({}){}",
+                theme.green,
+                plugins.len(),
+                plugins
+                    .iter()
+                    .map(|p| p.name.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", "),
+                theme.reset
+            );
+        }
+        println!(
+            "{}===================================================={}\n",
+            theme.cyan, theme.reset
+        );
+    } else {
+        println!(
+            "{}Nexus{} [{}] (session: {})",
+            theme.cyan, theme.reset, config.model, session.id
         );
     }
-    println!("\x1b[1;36m====================================================\x1b[0m\n");
+
+    let final_key = if config.api_key.is_empty() {
+        "DUMMY_KEY_FOR_LOCAL_TEST".to_string()
+    } else {
+        config.api_key.clone()
+    };
+
+    let mut provider_builder = AnthropicProvider::new(final_key, Some(config.model.clone()));
+    if let Some(ref b) = config.base_url {
+        provider_builder = provider_builder.with_base_url(b.clone());
+    }
 
     let provider = Arc::new(provider_builder);
     let tool_defs = ToolManager::tool_definitions();
@@ -222,7 +500,7 @@ Always inspect files before modifying them, and prefer focused edits using `edit
             );
         }
 
-        print!("\x1b[1;32mnexus>\x1b[0m ");
+        print!("{}nexus>{} ", theme.green, theme.reset);
         io::stdout().flush()?;
 
         let mut input = String::new();
@@ -243,6 +521,7 @@ Always inspect files before modifying them, and prefer focused edits using `edit
         // Handle slash commands
         if trimmed == "/help" {
             println!("\x1b[1;33mAvailable Commands:\x1b[0m");
+            println!("  /setup                  - Reconfigure color mode, display mode, provider, and model");
             println!("  /ceo                    - Run CEO review (challenge assumptions, evaluate 10-star product & scope)");
             println!("  /eng                    - Run Engineering architecture review (invariants, data flow, failure modes)");
             println!(
@@ -269,6 +548,25 @@ Always inspect files before modifying them, and prefer focused edits using `edit
                         );
                     }
                 }
+            }
+            continue;
+        }
+
+        if trimmed == "/setup" {
+            match run_setup_wizard() {
+                Ok(new_cfg) => {
+                    config = new_cfg;
+                    theme = Theme::for_mode(config.color_mode);
+                    println!(
+                        "{}Active configuration updated! Theme: {:?}, Display: {:?}, Model: {}{}",
+                        theme.green,
+                        config.color_mode,
+                        config.display_mode,
+                        config.model,
+                        theme.reset
+                    );
+                }
+                Err(err) => eprintln!("{}Setup error: {}{}", theme.red, err, theme.reset),
             }
             continue;
         }
@@ -548,7 +846,7 @@ Always inspect files before modifying them, and prefer focused edits using `edit
                     .await
             });
 
-            print!("\x1b[1;35mAI:\x1b[0m ");
+            print!("{}AI:{} ", theme.magenta, theme.reset);
             io::stdout().flush()?;
 
             while let Some(event) = rx.recv().await {
