@@ -362,21 +362,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Load or initialize user configuration (Theme, Display Mode, Provider)
     let mut config = if cli.setup {
         run_setup_wizard()?
-    } else if let Some(loaded) = NexusConfig::load() {
+    } else if let Some(loaded) = NexusConfig::load_from_workspace_or_global(&workspace_dir) {
         loaded
     } else {
         let has_env = std::env::var("ANTHROPIC_API_KEY").is_ok()
             || std::env::var("ANTHROPIC_AUTH_TOKEN").is_ok();
-        let claude_cfg = try_import_claude_settings();
 
-        if !has_env && claude_cfg.is_none() {
+        if !has_env {
             println!(
                 "\x1b[1;36mNo existing configuration detected. Launching setup wizard...\x1b[0m\n"
             );
             run_setup_wizard()?
-        } else if let Some(cfg) = claude_cfg {
-            let _ = cfg.save();
-            cfg
         } else {
             NexusConfig::default()
         }
