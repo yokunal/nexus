@@ -107,6 +107,7 @@ fn try_import_claude_settings() -> Option<NexusConfig> {
                         .or_else(|| env_obj.get("ANTHROPIC_API_KEY"))
                         .and_then(|v| v.as_str())
                         .unwrap_or("")
+                        .trim()
                         .to_string();
                     let base_url = env_obj
                         .get("ANTHROPIC_BASE_URL")
@@ -385,7 +386,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     if let Ok(key) =
         std::env::var("ANTHROPIC_API_KEY").or_else(|_| std::env::var("ANTHROPIC_AUTH_TOKEN"))
     {
-        config.api_key = key;
+        config.api_key = key.trim().to_string();
     }
     if let Ok(url) = std::env::var("ANTHROPIC_BASE_URL") {
         config.base_url = Some(url);

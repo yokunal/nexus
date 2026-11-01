@@ -42,11 +42,12 @@ impl LlmProvider for AnthropicProvider {
         tools: &[serde_json::Value],
         event_tx: Sender<NexusEvent>,
     ) -> Result<Message, ProviderError> {
+        let clean_key = self.api_key.trim();
         let mut headers = HeaderMap::new();
-        if let Ok(key_val) = HeaderValue::from_str(&self.api_key) {
+        if let Ok(key_val) = HeaderValue::from_str(clean_key) {
             headers.insert("x-api-key", key_val);
         }
-        if let Ok(bearer_val) = HeaderValue::from_str(&format!("Bearer {}", self.api_key)) {
+        if let Ok(bearer_val) = HeaderValue::from_str(&format!("Bearer {}", clean_key)) {
             headers.insert("authorization", bearer_val);
         }
         headers.insert("anthropic-version", HeaderValue::from_static("2023-06-01"));
