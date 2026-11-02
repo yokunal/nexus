@@ -230,13 +230,13 @@ impl LlmProvider for AnthropicProvider {
                     if let Some(msg) = data.get("message") {
                         if let Some(u) = msg.get("usage") {
                             if let Some(inp) = u.get("input_tokens").and_then(|v| v.as_u64()) {
-                                usage.input_tokens = inp as u32;
+                                usage.input_tokens = usage.input_tokens.max(inp as u32);
                             }
                             if let Some(cr) = u.get("cache_read_input_tokens").and_then(|v| v.as_u64()) {
-                                usage.cache_read_tokens = cr as u32;
+                                usage.cache_read_tokens = usage.cache_read_tokens.max(cr as u32);
                             }
                             if let Some(cc) = u.get("cache_creation_input_tokens").and_then(|v| v.as_u64()) {
-                                usage.cache_creation_tokens = cc as u32;
+                                usage.cache_creation_tokens = usage.cache_creation_tokens.max(cc as u32);
                             }
                         }
                     }
@@ -244,7 +244,16 @@ impl LlmProvider for AnthropicProvider {
                 "message_delta" => {
                     if let Some(u) = data.get("usage") {
                         if let Some(out) = u.get("output_tokens").and_then(|v| v.as_u64()) {
-                            usage.output_tokens = out as u32;
+                            usage.output_tokens = usage.output_tokens.max(out as u32);
+                        }
+                        if let Some(inp) = u.get("input_tokens").and_then(|v| v.as_u64()) {
+                            usage.input_tokens = usage.input_tokens.max(inp as u32);
+                        }
+                        if let Some(cr) = u.get("cache_read_input_tokens").and_then(|v| v.as_u64()) {
+                            usage.cache_read_tokens = usage.cache_read_tokens.max(cr as u32);
+                        }
+                        if let Some(cc) = u.get("cache_creation_input_tokens").and_then(|v| v.as_u64()) {
+                            usage.cache_creation_tokens = usage.cache_creation_tokens.max(cc as u32);
                         }
                     }
                 }
@@ -287,10 +296,23 @@ impl LlmProvider for AnthropicProvider {
                     }
                 }
                 "message_stop" => {
-                    break;
+                    // Do not break early; proxy endpoints may stream final message_delta after stop
                 }
                 _ => {}
             }
+        }
+
+        // Fallback estimation if third-party proxy omitted usage tokens
+        if usage.output_tokens == 0 {
+            let tool_json_chars: usize = tool_calls.iter().map(|tc| tc.arguments.to_string().len()).sum();
+            let total_out = full_text.len() + tool_json_chars;
+            if total_out > 0 {
+                usage.output_tokens = ((total_out + 3) / 4).max(1) as u32;
+            }
+        }
+        if usage.input_tokens == 0 {
+            let est_input_chars: usize = history.iter().map(|m| m.content.len()).sum();
+            usage.input_tokens = ((est_input_chars + system_prompt.len() + 3) / 4).max(10) as u32;
         }
 
         let _ = event_tx.send(NexusEvent::TokenUsageRecorded(usage)).await;
