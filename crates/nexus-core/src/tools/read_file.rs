@@ -49,3 +49,24 @@ pub fn read_file_lines(
 
     Ok(selected.join("\n"))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_read_file_truncation() {
+        let temp_dir = std::env::temp_dir();
+        let file_path = temp_dir.join(format!("test_read_truncation_{}.txt", uuid::Uuid::new_v4()));
+        let content: Vec<String> = (1..=600).map(|i| format!("line {}", i)).collect();
+        fs::write(&file_path, content.join("\n")).unwrap();
+
+        let read = read_file_lines(&file_path, None, None).unwrap();
+        assert!(read.contains("line 1"));
+        assert!(read.contains("line 400"));
+        assert!(!read.contains(" 401: line 401"));
+        assert!(read.contains("Truncated for token efficiency"));
+
+        let _ = fs::remove_file(&file_path);
+    }
+}

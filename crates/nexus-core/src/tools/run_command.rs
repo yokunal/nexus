@@ -166,4 +166,18 @@ mod tests {
         assert!(!keys.contains(&"SSH_AUTH_SOCK".to_string()));
         assert!(!keys.contains(&"HTTP_PROXY".to_string()));
     }
+
+    #[test]
+    fn test_compact_output_stream() {
+        let short = "Line 1\nLine 2\nLine 3";
+        assert_eq!(compact_output_stream(short, 10), short);
+
+        let lines: Vec<String> = (1..=100).map(|i| format!("Compiling crate_{}", i)).collect();
+        let long_output = lines.join("\n");
+        let compacted = compact_output_stream(&long_output, 20);
+
+        assert!(compacted.contains("Compiling crate_1"));
+        assert!(compacted.contains("Compiling crate_100"));
+        assert!(compacted.contains("80 lines omitted for token efficiency"));
+    }
 }

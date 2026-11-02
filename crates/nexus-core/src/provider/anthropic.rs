@@ -309,3 +309,22 @@ impl LlmProvider for AnthropicProvider {
         })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_compact_historical_output() {
+        let short = "Line 1\nLine 2";
+        assert_eq!(AnthropicProvider::compact_historical_output(short), short);
+
+        let lines: Vec<String> = (1..=100).map(|i| format!("Historical compiler output line {}", i)).collect();
+        let long_output = lines.join("\n");
+        let compacted = AnthropicProvider::compact_historical_output(&long_output);
+
+        assert!(compacted.contains("Historical compiler output line 1"));
+        assert!(compacted.contains("Historical compiler output line 100"));
+        assert!(compacted.contains("88 lines omitted in conversation history for token efficiency"));
+    }
+}
