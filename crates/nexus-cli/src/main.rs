@@ -8,6 +8,7 @@ use nexus_core::plugins::PluginManager;
 use nexus_core::provider::anthropic::AnthropicProvider;
 use nexus_core::provider::LlmProvider;
 use nexus_core::rea::ReaBridge;
+use nexus_core::rust_specialist::{CheckMode, RustCheckRunner};
 use nexus_core::sandbox::Sandbox;
 use nexus_core::session::{Message, SessionStore};
 use nexus_core::skills::{SkillManager, SkillWatcher};
@@ -464,10 +465,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let plugins_prompt = PluginManager::format_plugins_prompt(&plugins);
 
     let mut base_system_prompt = format!(
-        "You are Nexus, a world-class AI coding assistant.
-You specialize in writing clean, modular, and robust software with an emphasis on idiomatic Rust and clean architecture.
+        "You are Nexus, an elite autonomous AI coding harness built in native Rust.
+You specialize in writing clean, modular, and robust software with an emphasis on idiomatic code, clean architecture, and precision edits.
 Your workspace is at: {}.
-Always inspect files before modifying them, and prefer focused edits using `edit_file` over overwriting entire files.
+
+### Autonomous Tool & CLI Execution Guidelines:
+1. You have direct access to tools: `run_command` (shell execution), `read_file`, `write_file`, `edit_file`, `cargo_check`, and `lsp_*`.
+2. Be proactive: when the user asks you to inspect, build, test, refactor, or fix an issue, execute the appropriate tools directly rather than merely giving conversational advice.
+3. Always inspect files using `read_file` before modifying them.
+4. Prefer focused surgical edits using `edit_file` over overwriting entire files. Preserve all existing comments, docstrings, tests, and formatting intact.
+5. After applying code changes, proactively verify your work by running `cargo_check` or `run_command` (test runner/linter) to confirm zero compiler errors or regressions before completing your response.
+6. Write complete, production-grade code. Never omit code, leave placeholders, or write lazy `// TODO` stubs.
 
 {}",
         workspace_dir.display(),
@@ -514,9 +522,39 @@ Always inspect files before modifying them, and prefer focused edits using `edit
             break;
         }
 
+        // Direct CLI pass-through with '!' prefix (e.g. !git status, !cargo check, !ls)
+        if let Some(cmd) = trimmed.strip_prefix('!') {
+            let cmd = cmd.trim();
+            if cmd.is_empty() {
+                println!("{}Usage: !<command> (e.g. !git status, !cargo check){}", theme.dim, theme.reset);
+                continue;
+            }
+            println!("{}╭─ ❯ Shell: {} ────────────────────────────{}", theme.border, cmd, theme.reset);
+            let shell_prog = if cfg!(windows) { "cmd" } else { "bash" };
+            let shell_arg = if cfg!(windows) { "/C" } else { "-c" };
+            let status = std::process::Command::new(shell_prog)
+                .arg(shell_arg)
+                .arg(cmd)
+                .current_dir(&workspace_dir)
+                .status();
+            match status {
+                Ok(s) => {
+                    let code_str = s.code().map(|c| c.to_string()).unwrap_or_else(|| "terminated".to_string());
+                    let color = if s.success() { "\x1b[32m" } else { "\x1b[31m" };
+                    println!("{}╰─ ⟡ Exited: {}{}{} ───────────────────────────────{}", theme.border, color, code_str, theme.border, theme.reset);
+                }
+                Err(e) => {
+                    eprintln!("{}╰─ ⟡ Execution failed: {}{}", theme.error, e, theme.reset);
+                }
+            }
+            continue;
+        }
+
         // Handle slash commands
         if trimmed == "/help" {
             println!("\x1b[1;33mAvailable Commands:\x1b[0m");
+            println!("  !<command>              - Execute shell command directly in workspace (zero API tokens)");
+            println!("  /doctor                 - Run compiler diagnostic check and trigger targeted repair");
             println!("  /theme [name]           - Switch visual palette (claude, cyberpunk, tokyo, amber, nordic, light, plain)");
             println!("  /tokens                 - Show real-time prompt cache hit rate and token efficiency metrics");
             println!("  /setup                  - Reconfigure color mode, display mode, provider, and model");
@@ -533,7 +571,6 @@ Always inspect files before modifying them, and prefer focused edits using `edit
             println!("  /recall <query>         - Search past sessions and distilled memory cards");
             println!("  /remember <topic>: <msg>- Save a distilled insight into long-term memory");
             println!("  /bench-memory           - Benchmark memory search throughput and microsecond latency");
-            println!("  /benchmark              - Run local air-gapped industry benchmark battery");
             println!("  /benchmark              - Run local air-gapped industry benchmark battery");
             println!("  /rea <path>             - Inspect a native binary via REA CLI");
             println!("  /plugins                - List active plugins and registered plugin slash commands");
@@ -824,6 +861,49 @@ Always inspect files before modifying them, and prefer focused edits using `edit
         };
 
         let prompt_to_send: String = match cmd_word {
+            "/doctor" | "/check" => {
+                println!("{}╭─ 🩺 Nexus Doctor: Running Diagnostics ─────────────────{}", theme.border, theme.reset);
+                println!("{}│{} Checking workspace compilation health...", theme.border, theme.reset);
+                let check_res = RustCheckRunner::run_check(
+                    &workspace_dir,
+                    CheckMode::Check,
+                ).await;
+                match check_res {
+                    Ok(res) => {
+                        if res.success {
+                            println!("{}│{} \x1b[1;32m✓ Clean build!\x1b[0m 0 compiler errors, {} warnings.{}", theme.border, theme.reset, res.warning_count, theme.reset);
+                            println!("{}╰──────────────────────────────────────────────────────────{}", theme.border, theme.reset);
+                            continue;
+                        } else {
+                            println!(
+                                "{}│{} \x1b[1;31m✗ {} compiler errors found:\x1b[0m{}",
+                                theme.border, theme.reset, res.error_count, theme.reset
+                            );
+                            let mut concise_error_summary = String::new();
+                            for (i, diag) in res.diagnostics.iter().filter(|d| d.is_error()).take(3).enumerate() {
+                                let loc = diag.spans.first().map(|s| format!("{}:{}:{}", s.file_name, s.line_start, s.column_start)).unwrap_or_else(|| "unknown".to_string());
+                                let code = diag.code.as_ref().map(|c| format!("[{}] ", c.code)).unwrap_or_default();
+                                println!("{}│{}   {}. \x1b[1m{}\x1b[0m {}{}", theme.border, theme.reset, i + 1, loc, code, diag.message);
+                                concise_error_summary.push_str(&format!("{}. {}: {}{}\n", i + 1, loc, code, diag.message));
+                                if let Some(tutor) = &diag.tutor_advice {
+                                    println!("{}│{}      \x1b[0;36m💡 Tutor: {}\x1b[0m", theme.border, theme.reset, tutor);
+                                }
+                            }
+                            println!("{}╰──────────────────────────────────────────────────────────{}", theme.border, theme.reset);
+                            println!("{}Initiating targeted precision repair with Nexus...{}", theme.brand_primary, theme.reset);
+                            format!(
+                                "The compiler reported {} error(s):\n{}\nPlease inspect the affected files, apply the minimal necessary fix using edit_file, and verify the repair by running cargo_check.",
+                                res.error_count, concise_error_summary
+                            )
+                        }
+                    }
+                    Err(e) => {
+                        println!("{}│{} \x1b[1;33m! Note: Cargo check not available in this directory: {}{}", theme.border, theme.reset, e, theme.reset);
+                        println!("{}╰──────────────────────────────────────────────────────────{}", theme.border, theme.reset);
+                        continue;
+                    }
+                }
+            }
             "/ceo" => {
                 println!("\x1b[1;35m[gstack]\x1b[0m Activating CEO Review Mode");
                 active_system_prompt.push_str("\n\n");
@@ -924,9 +1004,20 @@ Always inspect files before modifying them, and prefer focused edits using `edit
         // Turn loop: stream model response, execute tools, repeat until model finishes
         let mut turn_active = true;
         let mut turn_counter = 0;
+        let max_tool_turns = 8;
         let mut last_turn_usage: Option<nexus_core::events::TokenUsage> = None;
 
         while turn_active {
+            if turn_counter >= max_tool_turns {
+                println!(
+                    "{}╭─ ⟡ Turn Limit Reached ───────────────────────────────────{}\n{}│{} Reached safety ceiling of {} tool iterations to protect API budget.\n{}│{} Type your next instruction to continue.\n{}╰──────────────────────────────────────────────────────────{}",
+                    theme.border, theme.reset,
+                    theme.border, theme.reset, max_tool_turns,
+                    theme.border, theme.reset,
+                    theme.border, theme.reset
+                );
+                break;
+            }
             turn_counter += 1;
             let turn_id = format!("{}-turn-{}", session.id, turn_counter);
 
