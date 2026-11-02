@@ -1,16 +1,16 @@
 {
-  "timestamp": "2026-11-01T11:11:53Z",
+  "timestamp": "2026-11-02T01:02:48Z",
   "total_tests": 11,
   "passed_tests": 11,
   "pass_rate_percent": 100.0,
-  "avg_latency_ms": 0.030124000464502552,
+  "avg_latency_ms": 0.019359726191921667,
   "results": [
     {
       "id": "patch_exact_tier1",
       "name": "Tier 1: Exact Match Patching",
       "category": "Patcher",
       "passed": true,
-      "latency_ms": 0.09931499880622141,
+      "latency_ms": 0.0512770056957379,
       "details": "Patch verified cleanly"
     },
     {
@@ -18,7 +18,7 @@
       "name": "Tier 2: Whitespace & Indentation Invariance",
       "category": "Patcher",
       "passed": true,
-      "latency_ms": 0.09490000229561701,
+      "latency_ms": 0.04723899473901838,
       "details": "Patch verified cleanly"
     },
     {
@@ -26,7 +26,7 @@
       "name": "Tier 3: Multi-line Anchor Context Patching",
       "category": "Patcher",
       "passed": true,
-      "latency_ms": 0.06988899986026809,
+      "latency_ms": 0.04721799632534385,
       "details": "Patch verified cleanly"
     },
     {
@@ -34,7 +34,7 @@
       "name": "Ambiguity Guard: Collision Prevention",
       "category": "Patcher",
       "passed": true,
-      "latency_ms": 0.007524999091401696,
+      "latency_ms": 0.005932000931352377,
       "details": "Ambiguity Guard intercepted 2 duplicate occurrences"
     },
     {
@@ -42,7 +42,7 @@
       "name": "Rust Doctor: Borrow of Moved Value (E0382)",
       "category": "RustSpecialist",
       "passed": true,
-      "latency_ms": 0.003087003278778866,
+      "latency_ms": 0.003879002179019153,
       "details": "Generated compiler repair advice for E0382"
     },
     {
@@ -50,7 +50,7 @@
       "name": "Rust Doctor: Simultaneous Borrow Conflict (E0502)",
       "category": "RustSpecialist",
       "passed": true,
-      "latency_ms": 0.0026470006559975445,
+      "latency_ms": 0.0036940036807209253,
       "details": "Generated compiler repair advice for E0502"
     },
     {
@@ -58,7 +58,7 @@
       "name": "Path Traversal Containment (../../etc/shadow)",
       "category": "Security",
       "passed": true,
-      "latency_ms": 0.0004930006980430335,
+      "latency_ms": 0.00041000021155923605,
       "details": "Containment boundary verified"
     },
     {
@@ -66,7 +66,7 @@
       "name": "Destructive Blacklist (rm -rf /)",
       "category": "Security",
       "passed": true,
-      "latency_ms": 0.0006980008038226515,
+      "latency_ms": 0.0005619949661195278,
       "details": "Containment boundary verified"
     },
     {
@@ -74,7 +74,7 @@
       "name": "Forkbomb Interception (:(){ :|:& };:)",
       "category": "Security",
       "passed": true,
-      "latency_ms": 0.0005139991117175668,
+      "latency_ms": 0.0004809990059584379,
       "details": "Containment boundary verified"
     },
     {
@@ -82,7 +82,7 @@
       "name": "Secret Scrubbing (GITHUB_TOKEN, SSH_AUTH_SOCK)",
       "category": "Security",
       "passed": true,
-      "latency_ms": 0.00029600050766021013,
+      "latency_ms": 0.00026499037630856037,
       "details": "Containment boundary verified"
     },
     {

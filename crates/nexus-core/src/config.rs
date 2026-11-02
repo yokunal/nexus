@@ -15,7 +15,12 @@ pub enum ConfigError {
 #[serde(rename_all = "snake_case")]
 pub enum ColorMode {
     #[default]
+    Claude,
     Dark,
+    Cyberpunk,
+    TokyoNight,
+    Amber,
+    Nordic,
     Light,
     Plain,
 }
@@ -42,7 +47,7 @@ pub struct NexusConfig {
 impl Default for NexusConfig {
     fn default() -> Self {
         Self {
-            color_mode: ColorMode::Dark,
+            color_mode: ColorMode::Claude,
             display_mode: DisplayMode::Rich,
             api_key: String::new(),
             base_url: None,
@@ -85,7 +90,7 @@ impl NexusConfig {
 
             if !token.is_empty() {
                 return Some(Self {
-                    color_mode: ColorMode::Dark,
+                    color_mode: ColorMode::Claude,
                     display_mode: DisplayMode::Rich,
                     api_key: token,
                     base_url,

@@ -32,6 +32,24 @@ impl GitSnapshotManager {
             .unwrap_or(false)
     }
 
+    /// Returns the current active branch name if inside a git repository.
+    pub fn current_branch(workspace: &Path) -> Option<String> {
+        let output = Command::new("git")
+            .arg("rev-parse")
+            .arg("--abbrev-ref")
+            .arg("HEAD")
+            .current_dir(workspace)
+            .output()
+            .ok()?;
+        if output.status.success() {
+            let branch = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            if !branch.is_empty() {
+                return Some(branch);
+            }
+        }
+        None
+    }
+
     /// Checks if the working tree has uncommitted modifications or untracked files.
     pub fn has_uncommitted_changes(workspace: &Path) -> Result<bool, GitError> {
         let output = Command::new("git")

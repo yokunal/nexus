@@ -1,6 +1,6 @@
 # Nexus Local Offline Benchmark Report
 
-> Generated on `2026-11-01 11:11:53 UTC`
+> Generated on `2026-11-02 01:02:48 UTC`
 > Run Environment: **100% Local Offline (Zero Internet Exposure)**
 
 ## Summary Scorecard
@@ -10,7 +10,7 @@
 | **Total Test Cases** | **11** | Verified |
 | **Passed Cases** | **11 / 11** | ✅ 100% Green |
 | **Pass Rate** | **100.0%** | Target: 100% |
-| **Average Task Latency** | **0.03 ms** | Sub-millisecond Execution |
+| **Average Task Latency** | **0.02 ms** | Sub-millisecond Execution |
 | **Resident Memory** | **~3.9 MB** | Featherweight Native Rust |
 
 ---
@@ -19,9 +19,9 @@
 
 | Category | Benchmark Name | Latency | Status | Details |
 |---|---|---|---|---|
-| `Patcher` | Tier 1: Exact Match Patching | `0.10 ms` | ✅ PASS | Patch verified cleanly |
-| `Patcher` | Tier 2: Whitespace & Indentation Invariance | `0.09 ms` | ✅ PASS | Patch verified cleanly |
-| `Patcher` | Tier 3: Multi-line Anchor Context Patching | `0.07 ms` | ✅ PASS | Patch verified cleanly |
+| `Patcher` | Tier 1: Exact Match Patching | `0.05 ms` | ✅ PASS | Patch verified cleanly |
+| `Patcher` | Tier 2: Whitespace & Indentation Invariance | `0.05 ms` | ✅ PASS | Patch verified cleanly |
+| `Patcher` | Tier 3: Multi-line Anchor Context Patching | `0.05 ms` | ✅ PASS | Patch verified cleanly |
 | `Patcher` | Ambiguity Guard: Collision Prevention | `0.01 ms` | ✅ PASS | Ambiguity Guard intercepted 2 duplicate occurrences |
 | `RustSpecialist` | Rust Doctor: Borrow of Moved Value (E0382) | `0.00 ms` | ✅ PASS | Generated compiler repair advice for E0382 |
 | `RustSpecialist` | Rust Doctor: Simultaneous Borrow Conflict (E0502) | `0.00 ms` | ✅ PASS | Generated compiler repair advice for E0502 |

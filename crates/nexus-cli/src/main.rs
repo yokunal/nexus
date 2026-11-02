@@ -17,6 +17,11 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::sync::mpsc;
 
+mod tui;
+use tui::{ThemePalette, TuiRenderer};
+
+pub type Theme = ThemePalette;
+
 #[derive(Parser, Debug)]
 #[command(
     name = "nexus",
@@ -117,47 +122,6 @@ fn get_process_memory_kb() -> Option<usize> {
     }
 }
 
-#[derive(Clone, Copy)]
-pub struct Theme {
-    pub cyan: &'static str,
-    pub green: &'static str,
-    pub yellow: &'static str,
-    pub magenta: &'static str,
-    pub red: &'static str,
-    pub reset: &'static str,
-}
-
-impl Theme {
-    pub fn for_mode(mode: ColorMode) -> Self {
-        match mode {
-            ColorMode::Dark => Self {
-                cyan: "\x1b[1;36m",
-                green: "\x1b[1;32m",
-                yellow: "\x1b[1;33m",
-                magenta: "\x1b[1;35m",
-                red: "\x1b[1;31m",
-                reset: "\x1b[0m",
-            },
-            ColorMode::Light => Self {
-                cyan: "\x1b[0;34m",
-                green: "\x1b[0;32m",
-                yellow: "\x1b[0;33m",
-                magenta: "\x1b[0;35m",
-                red: "\x1b[0;31m",
-                reset: "\x1b[0m",
-            },
-            ColorMode::Plain => Self {
-                cyan: "",
-                green: "",
-                yellow: "",
-                magenta: "",
-                red: "",
-                reset: "",
-            },
-        }
-    }
-}
-
 fn try_import_claude_settings() -> Option<NexusConfig> {
     let home = std::env::var_os("HOME")
         .or_else(|| std::env::var_os("USERPROFILE"))
@@ -186,7 +150,7 @@ fn try_import_claude_settings() -> Option<NexusConfig> {
 
                     if !token.is_empty() {
                         return Some(NexusConfig {
-                            color_mode: ColorMode::Dark,
+                            color_mode: ColorMode::Claude,
                             display_mode: DisplayMode::Rich,
                             api_key: token,
                             base_url,
@@ -208,19 +172,27 @@ fn run_setup_wizard() -> io::Result<NexusConfig> {
     let stdin = io::stdin();
     let mut reader = stdin.lock();
 
-    // 1. Color Mode
-    println!("\x1b[1;33m[1/4] Select Color Mode:\x1b[0m");
-    println!("  1) Dark Mode (Vibrant cyan, yellow, green accents) [Default]");
-    println!("  2) Light Mode (Optimized for light background terminals)");
-    println!("  3) Plain Text / No Color (Clean monochrome)");
-    print!("Choose [1-3] (default 1): ");
+    // 1. Color Palette / Theme
+    println!("\x1b[1;38;2;217;107;39m[1/4] Select Visual Palette & Theme:\x1b[0m");
+    println!("  1) \x1b[38;2;217;107;39mClaude Terracotta\x1b[0m (Iconic Anthropic warm coral & terracotta) [Default]");
+    println!("  2) \x1b[38;2;0;245;255mCyberpunk Neon\x1b[0m (Electric cyan, hot pink & cyber yellow)");
+    println!("  3) \x1b[38;2;122;162;247mTokyo Night\x1b[0m (Calm deep indigo, mint & lavender)");
+    println!("  4) \x1b[38;2;255;176;0mDec Amber CRT\x1b[0m (Classic retro monochrome amber CRT glow)");
+    println!("  5) \x1b[38;2;136;192;208mNordic Frost\x1b[0m (Arctic ice blue, snow white & dark slate)");
+    println!("  6) \x1b[38;2;203;75;22mSolarized Light\x1b[0m (Clean warm paper for bright terminals)");
+    println!("  7) Plain Text (Monochrome, zero ANSI codes for logging)");
+    print!("Choose [1-7] (default 1): ");
     io::stdout().flush()?;
     let mut choice = String::new();
     reader.read_line(&mut choice)?;
     let color_mode = match choice.trim() {
-        "2" => ColorMode::Light,
-        "3" => ColorMode::Plain,
-        _ => ColorMode::Dark,
+        "2" => ColorMode::Cyberpunk,
+        "3" => ColorMode::TokyoNight,
+        "4" => ColorMode::Amber,
+        "5" => ColorMode::Nordic,
+        "6" => ColorMode::Light,
+        "7" => ColorMode::Plain,
+        _ => ColorMode::Claude,
     };
 
     // 2. Display Mode
@@ -461,71 +433,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Load plugins (workspace .nexus/plugins + Claude Code plugins)
     let plugins = PluginManager::load_all(&workspace_dir).unwrap_or_default();
 
-    if config.display_mode == DisplayMode::Rich {
-        println!(
-            "{}===================================================={}",
-            theme.cyan, theme.reset
-        );
-        println!(
-            "{}  Nexus: The Polyglot & Rust AI Coding Harness      {}",
-            theme.cyan, theme.reset
-        );
-        println!(
-            "{}  Workspace: {}{}",
-            theme.cyan,
-            workspace_dir.display(),
-            theme.reset
-        );
-        println!("{}  Session ID: {}{}", theme.cyan, session.id, theme.reset);
-        if ReaBridge::is_available() {
-            println!(
-                "{}  REA Plugin: Enabled (Recon & Decompilation ready){}",
-                theme.green, theme.reset
-            );
-        }
-        if let Some(ref b) = config.base_url {
-            println!("{}  Endpoint: {}{}", theme.green, b, theme.reset);
-        }
-        println!(
-            "{}  Active Model: {}{}",
-            theme.green, config.model, theme.reset
-        );
-        println!(
-            "{}  Theme: {:?} | Display: {:?}{}",
-            theme.yellow, config.color_mode, config.display_mode, theme.reset
-        );
-        if let Some(kb) = get_process_memory_kb() {
-            println!(
-                "{}  Process Memory: {:.1} MB ({} KB){}",
-                theme.green,
-                kb as f64 / 1024.0,
-                kb,
-                theme.reset
-            );
-        }
-        if !plugins.is_empty() {
-            println!(
-                "{}  Plugins: {} active ({}){}",
-                theme.green,
-                plugins.len(),
-                plugins
-                    .iter()
-                    .map(|p| p.name.as_str())
-                    .collect::<Vec<_>>()
-                    .join(", "),
-                theme.reset
-            );
-        }
-        println!(
-            "{}===================================================={}\n",
-            theme.cyan, theme.reset
-        );
-    } else {
-        println!(
-            "{}Nexus{} [{}] (session: {})",
-            theme.cyan, theme.reset, config.model, session.id
-        );
-    }
+    let git_branch = GitSnapshotManager::current_branch(&workspace_dir);
+    TuiRenderer::render_banner(
+        &config,
+        &workspace_dir,
+        git_branch.as_deref(),
+        get_process_memory_kb(),
+        ReaBridge::is_available(),
+        plugins.len(),
+        &theme,
+    );
 
     let final_key = if config.api_key.is_empty() {
         "DUMMY_KEY_FOR_LOCAL_TEST".to_string()
@@ -572,7 +489,12 @@ Always inspect files before modifying them, and prefer focused edits using `edit
         }
 
         trim_working_set();
-        print!("{}nexus>{} ", theme.green, theme.reset);
+        TuiRenderer::render_prompt(
+            &workspace_dir,
+            git_branch.as_deref(),
+            get_process_memory_kb(),
+            &theme,
+        );
         io::stdout().flush()?;
 
         let mut input = String::new();
@@ -593,6 +515,7 @@ Always inspect files before modifying them, and prefer focused edits using `edit
         // Handle slash commands
         if trimmed == "/help" {
             println!("\x1b[1;33mAvailable Commands:\x1b[0m");
+            println!("  /theme [name]           - Switch visual palette (claude, cyberpunk, tokyo, amber, nordic, light, plain)");
             println!("  /setup                  - Reconfigure color mode, display mode, provider, and model");
             println!("  /status                 - Show real-time process memory, SQLite cache, and diagnostics");
             println!("  /ceo                    - Run CEO review (challenge assumptions, evaluate 10-star product & scope)");
@@ -607,6 +530,7 @@ Always inspect files before modifying them, and prefer focused edits using `edit
             println!("  /recall <query>         - Search past sessions and distilled memory cards");
             println!("  /remember <topic>: <msg>- Save a distilled insight into long-term memory");
             println!("  /bench-memory           - Benchmark memory search throughput and microsecond latency");
+            println!("  /benchmark              - Run local air-gapped industry benchmark battery");
             println!("  /benchmark              - Run local air-gapped industry benchmark battery");
             println!("  /rea <path>             - Inspect a native binary via REA CLI");
             println!("  /plugins                - List active plugins and registered plugin slash commands");
@@ -626,21 +550,55 @@ Always inspect files before modifying them, and prefer focused edits using `edit
             continue;
         }
 
+        if trimmed == "/theme" || trimmed.starts_with("/theme ") {
+            let arg = trimmed.strip_prefix("/theme").unwrap_or("").trim();
+            if arg.is_empty() {
+                println!("\x1b[1;38;2;217;107;39mAvailable Themes:\x1b[0m");
+                println!("  \x1b[38;2;217;107;39m/theme claude\x1b[0m     - Anthropic Terracotta & Warm Coral [Default]");
+                println!("  \x1b[38;2;0;245;255m/theme cyberpunk\x1b[0m  - Electric Cyan, Hot Pink & Cyber Gold");
+                println!("  \x1b[38;2;122;162;247m/theme tokyo\x1b[0m      - Tokyo Night Indigo, Mint & Lavender");
+                println!("  \x1b[38;2;255;176;0m/theme amber\x1b[0m      - Classic Amber CRT Glow");
+                println!("  \x1b[38;2;136;192;208m/theme nordic\x1b[0m     - Arctic Ice & Deep Slate");
+                println!("  \x1b[38;2;203;75;22m/theme light\x1b[0m      - Solarized Paper for Light Terminals");
+                println!("  /theme plain      - Monochrome Plain Text");
+            } else {
+                let new_mode = match arg.to_lowercase().as_str() {
+                    "cyberpunk" | "neon" => ColorMode::Cyberpunk,
+                    "tokyo" | "tokyonight" => ColorMode::TokyoNight,
+                    "amber" | "crt" => ColorMode::Amber,
+                    "nordic" | "frost" | "nord" => ColorMode::Nordic,
+                    "light" | "paper" => ColorMode::Light,
+                    "plain" | "none" => ColorMode::Plain,
+                    _ => ColorMode::Claude,
+                };
+                config.color_mode = new_mode;
+                theme = Theme::for_mode(new_mode);
+                if let Err(err) = config.save() {
+                    eprintln!("Warning: failed to persist theme config: {}", err);
+                }
+                println!(
+                    "{}Theme switched to: {}{}",
+                    theme.brand_primary, theme.name, theme.reset
+                );
+            }
+            continue;
+        }
+
         if trimmed == "/setup" {
             match run_setup_wizard() {
                 Ok(new_cfg) => {
                     config = new_cfg;
                     theme = Theme::for_mode(config.color_mode);
                     println!(
-                        "{}Active configuration updated! Theme: {:?}, Display: {:?}, Model: {}{}",
-                        theme.green,
-                        config.color_mode,
+                        "{}Active configuration updated! Theme: {}, Display: {:?}, Model: {}{}",
+                        theme.brand_primary,
+                        theme.name,
                         config.display_mode,
                         config.model,
                         theme.reset
                     );
                 }
-                Err(err) => eprintln!("{}Setup error: {}{}", theme.red, err, theme.reset),
+                Err(err) => eprintln!("{}Setup error: {}{}", theme.error, err, theme.reset),
             }
             continue;
         }
@@ -653,18 +611,18 @@ Always inspect files before modifying them, and prefer focused edits using `edit
             };
             println!(
                 "{}--- Nexus Process Diagnostics ---{}",
-                theme.cyan, theme.reset
+                theme.brand_primary, theme.reset
             );
             println!("  Process Memory: {}", mem_str);
             println!("  Session ID:     {}", session.id);
             println!("  Model:          {}", config.model);
-            println!("  Theme:          {:?}", config.color_mode);
+            println!("  Theme:          {} ({:?})", theme.name, config.color_mode);
             println!("  Display Mode:   {:?}", config.display_mode);
             println!("  SQLite Cache:   256 KB");
             println!("  Note: Windows Terminal DirectX GPU renderer uses ~50 MB separately for the window frame.");
             println!(
                 "{}---------------------------------{}",
-                theme.cyan, theme.reset
+                theme.brand_primary, theme.reset
             );
             continue;
         }
@@ -975,7 +933,7 @@ Always inspect files before modifying them, and prefer focused edits using `edit
                     .await
             });
 
-            print!("{}AI:{} ", theme.magenta, theme.reset);
+            TuiRenderer::render_ai_prefix(&theme);
             io::stdout().flush()?;
 
             while let Some(event) = rx.recv().await {
@@ -985,10 +943,7 @@ Always inspect files before modifying them, and prefer focused edits using `edit
                         io::stdout().flush()?;
                     }
                     NexusEvent::ToolCallStarted(ref call) => {
-                        println!(
-                            "\n\x1b[1;33m[Tool Call]\x1b[0m {} {:?}",
-                            call.name, call.arguments
-                        );
+                        TuiRenderer::render_tool_call_start(&call.name, &call.arguments, &theme);
                     }
                     _ => {}
                 }
@@ -998,7 +953,7 @@ Always inspect files before modifying them, and prefer focused edits using `edit
             let assistant_msg = match handle.await? {
                 Ok(msg) => msg,
                 Err(err) => {
-                    eprintln!("\x1b[1;31mProvider Error: {}\x1b[0m", err);
+                    eprintln!("{}Provider Error: {}{}", theme.error, err, theme.reset);
                     break;
                 }
             };
@@ -1019,17 +974,22 @@ Always inspect files before modifying them, and prefer focused edits using `edit
                     GitSnapshotManager::create_turn_snapshot(&workspace_dir, &turn_id)
                 {
                     println!(
-                        "\x1b[0;32m[Git Snapshot]\x1b[0m Ref: {} (dirty worktree: {})",
+                        "{}╭─ ⟡ Git Snapshot ──────────────────────────────{}\n{}│{} Ref: {} (dirty worktree: {})\n{}╰───────────────────────────────────────────────────{}",
+                        theme.border,
+                        theme.reset,
+                        theme.border,
+                        theme.reset,
                         &snapshot.commit_or_stash_sha[..8.min(snapshot.commit_or_stash_sha.len())],
-                        snapshot.had_uncommitted_changes
+                        snapshot.had_uncommitted_changes,
+                        theme.border,
+                        theme.reset
                     );
                 }
 
                 let mut results = Vec::new();
                 for call in calls {
-                    println!("\x1b[1;34m[Executing]\x1b[0m {}", call.name);
                     let result = tool_manager.execute(call).await;
-                    println!("\x1b[0;34m[Result]\x1b[0m {}", result.output);
+                    TuiRenderer::render_tool_result(&call.name, &result.output, !result.is_error, &theme);
                     results.push(result);
                 }
 
@@ -1046,6 +1006,8 @@ Always inspect files before modifying them, and prefer focused edits using `edit
                 turn_active = false;
             }
         }
+
+        TuiRenderer::render_turn_footer(get_process_memory_kb(), &theme);
     }
 
     Ok(())
