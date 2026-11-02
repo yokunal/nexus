@@ -85,6 +85,26 @@ pub fn get_scrubbed_env() -> Vec<(String, String)> {
         .collect()
 }
 
+/// Compact command outputs with intelligent head+tail truncation if output exceeds max_lines.
+pub fn compact_output_stream(output: &str, max_lines: usize) -> String {
+    let lines: Vec<&str> = output.lines().collect();
+    if lines.len() <= max_lines {
+        return output.to_string();
+    }
+
+    let half = max_lines / 2;
+    let head: Vec<&str> = lines.iter().take(half).copied().collect();
+    let tail: Vec<&str> = lines.iter().rev().take(half).rev().copied().collect();
+    let omitted = lines.len().saturating_sub(max_lines);
+
+    format!(
+        "{}\n[... {} lines omitted for token efficiency ...]\n{}",
+        head.join("\n"),
+        omitted,
+        tail.join("\n")
+    )
+}
+
 pub async fn execute_command(
     command_line: &str,
     working_dir: &Path,
@@ -109,10 +129,13 @@ pub async fn execute_command(
         Err(_) => return Err(CommandError::Timeout(timeout_duration)),
     };
 
+    let stdout_str = String::from_utf8_lossy(&output.stdout);
+    let stderr_str = String::from_utf8_lossy(&output.stderr);
+
     Ok(CommandOutput {
         exit_code: output.status.code(),
-        stdout: String::from_utf8_lossy(&output.stdout).to_string(),
-        stderr: String::from_utf8_lossy(&output.stderr).to_string(),
+        stdout: compact_output_stream(&stdout_str, 80),
+        stderr: compact_output_stream(&stderr_str, 80),
     })
 }
 

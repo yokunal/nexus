@@ -18,6 +18,25 @@ pub struct AnthropicProvider {
 }
 
 impl AnthropicProvider {
+    /// Intelligent head+tail compaction for historical tool results to prevent context window bloat.
+    fn compact_historical_output(output: &str) -> String {
+        let lines: Vec<&str> = output.lines().collect();
+        if lines.len() <= 24 && output.len() <= 1200 {
+            return output.to_string();
+        }
+
+        let head: Vec<&str> = lines.iter().take(6).copied().collect();
+        let tail: Vec<&str> = lines.iter().rev().take(6).rev().copied().collect();
+        let omitted = lines.len().saturating_sub(12);
+
+        format!(
+            "{}\n[... {} lines omitted in conversation history for token efficiency ...]\n{}",
+            head.join("\n"),
+            omitted,
+            tail.join("\n")
+        )
+    }
+
     pub fn new(api_key: String, model: Option<String>) -> Self {
         Self {
             client: reqwest::Client::new(),
@@ -57,19 +76,27 @@ impl LlmProvider for AnthropicProvider {
         );
         headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
 
-        // Format messages for Anthropic API
+        // Format messages for Anthropic API with token efficiency compactor
+        let history_len = history.len();
         let mut formatted_messages: Vec<serde_json::Value> = history
             .iter()
-            .map(|m| {
+            .enumerate()
+            .map(|(idx, m)| {
+                let is_historical = idx < history_len.saturating_sub(2);
                 if let Some(tool_results) = &m.tool_results {
                     // Tool result turn
                     let content_blocks: Vec<serde_json::Value> = tool_results
                         .iter()
                         .map(|tr| {
+                            let content_to_send = if is_historical {
+                                Self::compact_historical_output(&tr.output)
+                            } else {
+                                tr.output.clone()
+                            };
                             json!({
                                 "type": "tool_result",
                                 "tool_use_id": tr.call_id,
-                                "content": tr.output,
+                                "content": content_to_send,
                                 "is_error": tr.is_error
                             })
                         })
@@ -187,6 +214,7 @@ impl LlmProvider for AnthropicProvider {
         let mut current_tool_name = String::new();
         let mut current_tool_json = String::new();
         let mut tool_calls = Vec::new();
+        let mut usage = crate::events::TokenUsage::default();
 
         while let Some(event) = stream.next().await {
             let event = event.map_err(|e| ProviderError::Stream(e.to_string()))?;
@@ -198,6 +226,28 @@ impl LlmProvider for AnthropicProvider {
             let event_type = data["type"].as_str().unwrap_or_default();
 
             match event_type {
+                "message_start" => {
+                    if let Some(msg) = data.get("message") {
+                        if let Some(u) = msg.get("usage") {
+                            if let Some(inp) = u.get("input_tokens").and_then(|v| v.as_u64()) {
+                                usage.input_tokens = inp as u32;
+                            }
+                            if let Some(cr) = u.get("cache_read_input_tokens").and_then(|v| v.as_u64()) {
+                                usage.cache_read_tokens = cr as u32;
+                            }
+                            if let Some(cc) = u.get("cache_creation_input_tokens").and_then(|v| v.as_u64()) {
+                                usage.cache_creation_tokens = cc as u32;
+                            }
+                        }
+                    }
+                }
+                "message_delta" => {
+                    if let Some(u) = data.get("usage") {
+                        if let Some(out) = u.get("output_tokens").and_then(|v| v.as_u64()) {
+                            usage.output_tokens = out as u32;
+                        }
+                    }
+                }
                 "content_block_start" => {
                     let block = &data["content_block"];
                     if block["type"].as_str() == Some("tool_use") {
@@ -243,6 +293,7 @@ impl LlmProvider for AnthropicProvider {
             }
         }
 
+        let _ = event_tx.send(NexusEvent::TokenUsageRecorded(usage)).await;
         let _ = event_tx.send(NexusEvent::TurnComplete).await;
 
         Ok(Message {

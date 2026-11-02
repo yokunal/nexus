@@ -573,21 +573,103 @@ impl TuiRenderer {
         );
     }
 
-    /// Render turn completed footer chip
-    pub fn render_turn_footer(memory_kb: Option<usize>, theme: &ThemePalette) {
+    /// Render turn completed footer chip with RAM and token efficiency metrics
+    pub fn render_turn_footer(
+        memory_kb: Option<usize>,
+        token_usage: Option<&nexus_core::events::TokenUsage>,
+        theme: &ThemePalette,
+    ) {
         let mem_str = match memory_kb {
             Some(kb) => format!("{:.1} MB", kb as f64 / 1024.0),
             None => "~3.9 MB".to_string(),
         };
 
+        let token_chip = match token_usage {
+            Some(u) if u.input_tokens > 0 || u.output_tokens > 0 || u.cache_read_tokens > 0 => {
+                let hit_rate = u.cache_hit_rate();
+                if u.cache_read_tokens > 0 {
+                    format!(
+                        " · {}{} tokens{} {}({:.0}% cached: {}){}",
+                        theme.text_primary,
+                        u.output_tokens,
+                        theme.reset,
+                        theme.success,
+                        hit_rate,
+                        u.cache_read_tokens,
+                        theme.reset
+                    )
+                } else {
+                    format!(
+                        " · {}{} tokens ({} in, {} out){}",
+                        theme.text_primary,
+                        u.input_tokens + u.output_tokens,
+                        u.input_tokens,
+                        u.output_tokens,
+                        theme.reset
+                    )
+                }
+            }
+            _ => "".to_string(),
+        };
+
         println!(
-            "\n{}─── {}⟡ Turn finished{} {}· RAM: {} · CPU: 0.0% ───{}\n",
+            "\n{}─── {}⟡ Turn finished{} {}· RAM: {} · CPU: 0.0%{}{} ───{}{}\n",
             theme.border,
             theme.brand_secondary,
             theme.reset,
             theme.text_dim,
             mem_str,
+            theme.text_dim,
+            token_chip,
+            theme.border,
             theme.reset
+        );
+    }
+
+    /// Render /tokens slash command scorecard
+    pub fn render_token_dashboard(tokens: &nexus_core::events::TokenUsage, theme: &ThemePalette) {
+        let total_input = tokens.input_tokens;
+        let total_cached = tokens.cache_read_tokens;
+        let total_created = tokens.cache_creation_tokens;
+        let total_output = tokens.output_tokens;
+        let total_tokens = total_input + total_output + total_cached;
+        let hit_rate = tokens.cache_hit_rate();
+
+        println!();
+        println!(
+            "{}╭─ {}✻ Token Efficiency & Prompt Cache Scorecard ───────────────────────{}{}",
+            theme.border,
+            theme.brand_primary,
+            theme.border,
+            theme.reset
+        );
+        println!(
+            "{}│{}  {}Total Output Tokens:      {}{:>8}{}",
+            theme.border, theme.reset, theme.text_dim, theme.text_primary, total_output, theme.reset
+        );
+        println!(
+            "{}│{}  {}Base Input Tokens:        {}{:>8}{}",
+            theme.border, theme.reset, theme.text_dim, theme.text_secondary, total_input, theme.reset
+        );
+        println!(
+            "{}│{}  {}Prompt Cache Read Tokens: {}{:>8}{} {}[90% API discount]{}",
+            theme.border, theme.reset, theme.text_dim, theme.success, total_cached, theme.reset, theme.success, theme.reset
+        );
+        println!(
+            "{}│{}  {}Cache Creation Tokens:    {}{:>8}{}",
+            theme.border, theme.reset, theme.text_dim, theme.warning, total_created, theme.reset
+        );
+        println!(
+            "{}│{}  {}Prompt Cache Hit Rate:    {}{:>7.1}%{}",
+            theme.border, theme.reset, theme.text_dim, theme.brand_glow, hit_rate, theme.reset
+        );
+        println!(
+            "{}│{}  {}Cumulative Processed:     {}{:>8} tokens{}",
+            theme.border, theme.reset, theme.text_dim, theme.bold, total_tokens, theme.reset
+        );
+        println!(
+            "{}╰─────────────────────────────────────────────────────────────────────────{}\n",
+            theme.border, theme.reset
         );
     }
 }

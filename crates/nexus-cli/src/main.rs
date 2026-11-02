@@ -479,6 +479,8 @@ Always inspect files before modifying them, and prefer focused edits using `edit
         base_system_prompt.push_str(&plugins_prompt);
     }
 
+    let mut session_tokens = nexus_core::events::TokenUsage::default();
+
     loop {
         // Non-blocking check for hotloaded skill notifications
         while let Ok(change) = skill_rx.try_recv() {
@@ -516,6 +518,7 @@ Always inspect files before modifying them, and prefer focused edits using `edit
         if trimmed == "/help" {
             println!("\x1b[1;33mAvailable Commands:\x1b[0m");
             println!("  /theme [name]           - Switch visual palette (claude, cyberpunk, tokyo, amber, nordic, light, plain)");
+            println!("  /tokens                 - Show real-time prompt cache hit rate and token efficiency metrics");
             println!("  /setup                  - Reconfigure color mode, display mode, provider, and model");
             println!("  /status                 - Show real-time process memory, SQLite cache, and diagnostics");
             println!("  /ceo                    - Run CEO review (challenge assumptions, evaluate 10-star product & scope)");
@@ -624,6 +627,11 @@ Always inspect files before modifying them, and prefer focused edits using `edit
                 "{}---------------------------------{}",
                 theme.brand_primary, theme.reset
             );
+            continue;
+        }
+
+        if trimmed == "/tokens" || trimmed == "/cost" {
+            TuiRenderer::render_token_dashboard(&session_tokens, &theme);
             continue;
         }
 
@@ -916,6 +924,7 @@ Always inspect files before modifying them, and prefer focused edits using `edit
         // Turn loop: stream model response, execute tools, repeat until model finishes
         let mut turn_active = true;
         let mut turn_counter = 0;
+        let mut last_turn_usage: Option<nexus_core::events::TokenUsage> = None;
 
         while turn_active {
             turn_counter += 1;
@@ -944,6 +953,13 @@ Always inspect files before modifying them, and prefer focused edits using `edit
                     }
                     NexusEvent::ToolCallStarted(ref call) => {
                         TuiRenderer::render_tool_call_start(&call.name, &call.arguments, &theme);
+                    }
+                    NexusEvent::TokenUsageRecorded(usage) => {
+                        session_tokens.input_tokens += usage.input_tokens;
+                        session_tokens.output_tokens += usage.output_tokens;
+                        session_tokens.cache_read_tokens += usage.cache_read_tokens;
+                        session_tokens.cache_creation_tokens += usage.cache_creation_tokens;
+                        last_turn_usage = Some(usage);
                     }
                     _ => {}
                 }
@@ -1007,7 +1023,7 @@ Always inspect files before modifying them, and prefer focused edits using `edit
             }
         }
 
-        TuiRenderer::render_turn_footer(get_process_memory_kb(), &theme);
+        TuiRenderer::render_turn_footer(get_process_memory_kb(), last_turn_usage.as_ref(), &theme);
     }
 
     Ok(())
