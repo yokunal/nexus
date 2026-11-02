@@ -18,16 +18,43 @@ pub struct AnthropicProvider {
 }
 
 impl AnthropicProvider {
-    /// Intelligent head+tail compaction for historical tool results to prevent context window bloat.
-    fn compact_historical_output(output: &str) -> String {
-        let lines: Vec<&str> = output.lines().collect();
-        if lines.len() <= 24 && output.len() <= 1200 {
-            return output.to_string();
+    /// Compresses whitespace, removes trailing whitespace per line, and collapses 2+ consecutive blank lines into 1.
+    pub fn compress_whitespace(text: &str) -> String {
+        let trimmed = text.trim();
+        if trimmed.is_empty() {
+            return String::new();
         }
 
-        let head: Vec<&str> = lines.iter().take(6).copied().collect();
-        let tail: Vec<&str> = lines.iter().rev().take(6).rev().copied().collect();
-        let omitted = lines.len().saturating_sub(12);
+        let mut lines = Vec::new();
+        let mut last_was_blank = false;
+
+        for line in trimmed.lines() {
+            let t = line.trim_end();
+            if t.is_empty() {
+                if !last_was_blank {
+                    lines.push("");
+                    last_was_blank = true;
+                }
+            } else {
+                lines.push(t);
+                last_was_blank = false;
+            }
+        }
+
+        lines.join("\n")
+    }
+
+    /// Tier 2: Mid-history compaction (3-5 turns ago). Keeps 4 head and 4 tail lines.
+    pub fn compact_mid_historical_output(output: &str) -> String {
+        let compressed = Self::compress_whitespace(output);
+        let lines: Vec<&str> = compressed.lines().collect();
+        if lines.len() <= 12 && compressed.len() <= 600 {
+            return compressed;
+        }
+
+        let head: Vec<&str> = lines.iter().take(4).copied().collect();
+        let tail: Vec<&str> = lines.iter().rev().take(4).rev().copied().collect();
+        let omitted = lines.len().saturating_sub(8);
 
         format!(
             "{}\n[... {} lines omitted in conversation history for token efficiency ...]\n{}",
@@ -35,6 +62,35 @@ impl AnthropicProvider {
             omitted,
             tail.join("\n")
         )
+    }
+
+    /// Tier 3: Deep-history compaction (>5 turns ago).
+    /// If success: collapses to a 1-line execution tombstone saving >95% tokens.
+    /// If error: preserves the first 2 error lines.
+    pub fn compact_deep_historical_output(output: &str, is_error: bool) -> String {
+        let compressed = Self::compress_whitespace(output);
+        let lines: Vec<&str> = compressed.lines().collect();
+        let count = lines.len();
+
+        if count <= 2 && compressed.len() <= 120 {
+            return compressed;
+        }
+
+        if is_error {
+            let error_head: Vec<&str> = lines.iter().take(2).copied().collect();
+            format!(
+                "{}\n[... {} lines of error output omitted ...]",
+                error_head.join("\n"),
+                count.saturating_sub(2)
+            )
+        } else {
+            format!("[Command/Tool succeeded. {} lines of past output omitted]", count)
+        }
+    }
+
+    /// Backwards compatible compaction helper
+    pub fn compact_historical_output(output: &str) -> String {
+        Self::compact_mid_historical_output(output)
     }
 
     pub fn new(api_key: String, model: Option<String>) -> Self {
@@ -76,22 +132,27 @@ impl LlmProvider for AnthropicProvider {
         );
         headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
 
-        // Format messages for Anthropic API with token efficiency compactor
+        // Format messages for Anthropic API with 3-tier progressive token compactor
         let history_len = history.len();
         let mut formatted_messages: Vec<serde_json::Value> = history
             .iter()
             .enumerate()
             .map(|(idx, m)| {
-                let is_historical = idx < history_len.saturating_sub(2);
+                let turns_from_end = history_len.saturating_sub(idx + 1);
                 if let Some(tool_results) = &m.tool_results {
-                    // Tool result turn
+                    // Tool result turn with 3-tier progressive compactor
                     let content_blocks: Vec<serde_json::Value> = tool_results
                         .iter()
                         .map(|tr| {
-                            let content_to_send = if is_historical {
-                                Self::compact_historical_output(&tr.output)
+                            let content_to_send = if turns_from_end <= 1 {
+                                // Tier 1 (recent/immediate: 0-1 turns ago): fresh output with whitespace compression
+                                Self::compress_whitespace(&tr.output)
+                            } else if turns_from_end <= 3 {
+                                // Tier 2 (mid history: 2-3 turns ago): 4 head + 4 tail lines
+                                Self::compact_mid_historical_output(&tr.output)
                             } else {
-                                tr.output.clone()
+                                // Tier 3 (deep history: 4+ turns ago): 1-line tombstone summary
+                                Self::compact_deep_historical_output(&tr.output, tr.is_error)
                             };
                             json!({
                                 "type": "tool_result",
@@ -343,10 +404,23 @@ mod tests {
 
         let lines: Vec<String> = (1..=100).map(|i| format!("Historical compiler output line {}", i)).collect();
         let long_output = lines.join("\n");
-        let compacted = AnthropicProvider::compact_historical_output(&long_output);
+        let compacted = AnthropicProvider::compact_mid_historical_output(&long_output);
 
         assert!(compacted.contains("Historical compiler output line 1"));
         assert!(compacted.contains("Historical compiler output line 100"));
-        assert!(compacted.contains("88 lines omitted in conversation history for token efficiency"));
+        assert!(compacted.contains("92 lines omitted in conversation history for token efficiency"));
+
+        // Test deep compaction (Tier 3)
+        let deep_success = AnthropicProvider::compact_deep_historical_output(&long_output, false);
+        assert!(deep_success.contains("[Command/Tool succeeded. 100 lines of past output omitted]"));
+
+        let deep_error = AnthropicProvider::compact_deep_historical_output(&long_output, true);
+        assert!(deep_error.contains("Historical compiler output line 1"));
+        assert!(deep_error.contains("98 lines of error output omitted"));
+
+        // Test whitespace compression
+        let messy = "line 1   \n\n\n\nline 2\n\n\n";
+        let cleaned = AnthropicProvider::compress_whitespace(messy);
+        assert_eq!(cleaned, "line 1\n\nline 2");
     }
 }

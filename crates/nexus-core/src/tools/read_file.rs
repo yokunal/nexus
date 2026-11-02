@@ -23,8 +23,8 @@ pub fn read_file_lines(
     let lines: Vec<&str> = content.lines().collect();
 
     let start = start_line.unwrap_or(1).saturating_sub(1);
-    let default_end = if start_line.is_none() && end_line.is_none() && lines.len() > 400 {
-        400
+    let default_end = if start_line.is_none() && end_line.is_none() && lines.len() > 200 {
+        200
     } else {
         lines.len()
     };
@@ -40,9 +40,9 @@ pub fn read_file_lines(
         .map(|(idx, line)| format!("{:4}: {}", start + idx + 1, line))
         .collect();
 
-    if start_line.is_none() && end_line.is_none() && lines.len() > 400 {
+    if start_line.is_none() && end_line.is_none() && lines.len() > 200 {
         selected.push(format!(
-            "\n... [Truncated for token efficiency: lines 1-400 of {} shown. Use start_line and end_line to inspect specific sections]",
+            "\n... [Truncated for token efficiency: lines 1-200 of {} shown. Use start_line and end_line to inspect specific sections]",
             lines.len()
         ));
     }
@@ -63,8 +63,8 @@ mod tests {
 
         let read = read_file_lines(&file_path, None, None).unwrap();
         assert!(read.contains("line 1"));
-        assert!(read.contains("line 400"));
-        assert!(!read.contains(" 401: line 401"));
+        assert!(read.contains("line 200"));
+        assert!(!read.contains(" 201: line 201"));
         assert!(read.contains("Truncated for token efficiency"));
 
         let _ = fs::remove_file(&file_path);
