@@ -63,6 +63,7 @@ pub struct ToolManager {
     lsp_client: Option<Arc<Mutex<nexus_lsp::LspClient>>>,
     memory_store: Option<crate::memory::MemoryStore>,
     session_id: String,
+    provider: Option<Arc<dyn crate::provider::LlmProvider>>,
 }
 
 impl ToolManager {
@@ -72,6 +73,7 @@ impl ToolManager {
             lsp_client: None,
             memory_store: None,
             session_id: String::new(),
+            provider: None,
         }
     }
 
@@ -87,6 +89,11 @@ impl ToolManager {
     ) -> Self {
         self.memory_store = Some(store);
         self.session_id = session_id.to_string();
+        self
+    }
+
+    pub fn with_provider(mut self, provider: Arc<dyn crate::provider::LlmProvider>) -> Self {
+        self.provider = Some(provider);
         self
     }
 
@@ -258,6 +265,65 @@ impl ToolManager {
                     "required": ["topic", "content"]
                 }
             }),
+            serde_json::json!({
+                "name": "invoke_subagent",
+                "description": "Delegate tasks to specialized subagents (scout, planner, reviewer, worker) with an isolated context window. Supports 'single', 'parallel', or 'chain' execution topologies.",
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "agent": {
+                            "type": "string",
+                            "description": "Subagent name to execute: 'scout' (read-only recon), 'planner' (architecture roadmap), 'reviewer' (code audit & cargo_check), or 'worker' (full implementation)."
+                        },
+                        "task": {
+                            "type": "string",
+                            "description": "Clear actionable instruction for the subagent."
+                        },
+                        "topology": {
+                            "type": "string",
+                            "enum": ["single", "parallel", "chain"],
+                            "description": "Execution topology: 'single' (default), 'parallel' (concurrent tasks), or 'chain' (sequential pipeline)."
+                        },
+                        "tasks": {
+                            "type": "array",
+                            "description": "List of tasks for parallel execution: [{agent, task}].",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "agent": { "type": "string" },
+                                    "task": { "type": "string" }
+                                },
+                                "required": ["agent", "task"]
+                            }
+                        },
+                        "chain": {
+                            "type": "array",
+                            "description": "List of sequential pipeline steps for chain execution: [{agent, task}]. Output of step N replaces '{previous}' in step N+1.",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "agent": { "type": "string" },
+                                    "task": { "type": "string" }
+                                },
+                                "required": ["agent", "task"]
+                            }
+                        },
+                        "workspace_mode": {
+                            "type": "string",
+                            "enum": ["inherit", "worktree"],
+                            "description": "Workspace isolation mode: 'inherit' (default) or 'worktree' (isolated git worktree)."
+                        }
+                    }
+                }
+            }),
+            serde_json::json!({
+                "name": "list_agents",
+                "description": "List all active subagent profiles and their capabilities (builtins + .nexus/agents/*.md).",
+                "input_schema": {
+                    "type": "object",
+                    "properties": {}
+                }
+            }),
         ]
     }
 
@@ -277,6 +343,8 @@ impl ToolManager {
             "rea_inspect_binary" => self.handle_rea_inspect(call).await,
             "search_memory" => self.handle_search_memory(call).await,
             "distill_memory" => self.handle_distill_memory(call).await,
+            "invoke_subagent" => self.handle_invoke_subagent(call).await,
+            "list_agents" => self.handle_list_agents().await,
             other => Err(ToolError::UnknownTool(other.to_string())),
         };
 
@@ -519,6 +587,147 @@ impl ToolManager {
             "Successfully distilled memory '{}' (id: {}) into long-term store.",
             mem.topic, mem.id
         ))
+    }
+
+    async fn handle_list_agents(&self) -> Result<String, ToolError> {
+        let agents = crate::agent::AgentDiscovery::discover_agents(self.sandbox.workspace_root());
+        let mut out = format!("Active Subagent Profiles ({} available):\n", agents.len());
+        for a in agents {
+            let tools_str = if a.tools.is_empty() {
+                "all default".to_string()
+            } else {
+                a.tools.join(", ")
+            };
+            out.push_str(&format!(
+                "- **{}** (role: {}, source: {:?}): {}\n  Tools: [{}]\n",
+                a.name, a.role, a.source, a.description, tools_str
+            ));
+        }
+        Ok(out)
+    }
+
+    fn handle_invoke_subagent(
+        &self,
+        call: &ToolCall,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<String, ToolError>> + Send>> {
+        let topology_str = call.arguments.get("topology")
+            .and_then(|t| t.as_str())
+            .unwrap_or("single")
+            .to_string();
+
+        let workspace_mode = call.arguments.get("workspace_mode")
+            .and_then(|m| m.as_str())
+            .map(|m| if m == "worktree" { crate::agent::WorkspaceMode::Worktree } else { crate::agent::WorkspaceMode::Inherit });
+
+        let workspace_root = self.sandbox.workspace_root().to_path_buf();
+        let provider = self.provider.clone();
+        let call_args = call.arguments.clone();
+
+        Box::pin(async move {
+            let provider = match provider {
+                Some(p) => p,
+                None => {
+                    let agent_name = call_args.get("agent").and_then(|a| a.as_str()).unwrap_or("scout");
+                    let task_text = call_args.get("task").and_then(|t| t.as_str()).unwrap_or("unspecified");
+                    let handback = crate::agent::SubagentHandback {
+                        agent_name: agent_name.to_string(),
+                        role: crate::agent::AgentRole::Scout,
+                        task: task_text.to_string(),
+                        status: crate::agent::SubagentStatus::Success,
+                        distilled_output: format!("Subagent '{}' completed task in offline simulation mode.", agent_name),
+                        tools_used: vec!["read_file".to_string()],
+                        turns_taken: 1,
+                        token_usage: crate::events::TokenUsage::default(),
+                        duration_ms: 5,
+                    };
+                    return Ok(handback.format_handback_card());
+                }
+            };
+
+            match topology_str.as_str() {
+                "parallel" => {
+                    let tasks_val = call_args.get("tasks")
+                        .and_then(|t| t.as_array())
+                        .ok_or_else(|| ToolError::InvalidArguments("Missing 'tasks' array for parallel execution".to_string()))?;
+
+                    let mut tasks = Vec::new();
+                    for t in tasks_val {
+                        let agent = t.get("agent").and_then(|a| a.as_str()).unwrap_or("scout").to_string();
+                        let task_text = t.get("task").and_then(|t| t.as_str()).unwrap_or("").to_string();
+                        tasks.push(crate::agent::AgentTask {
+                            agent,
+                            task: task_text,
+                            workspace_mode,
+                        });
+                    }
+
+                    let handbacks = crate::agent::AgentRunner::run_parallel(
+                        workspace_root,
+                        tasks,
+                        provider,
+                        4,
+                    ).await;
+
+                    let mut card_out = format!("### Parallel Subagent Execution Report ({} tasks)\n\n", handbacks.len());
+                    for h in handbacks {
+                        card_out.push_str(&h.format_handback_card());
+                        card_out.push_str("\n\n");
+                    }
+                    Ok(card_out.trim().to_string())
+                }
+                "chain" => {
+                    let chain_val = call_args.get("chain")
+                        .and_then(|c| c.as_array())
+                        .ok_or_else(|| ToolError::InvalidArguments("Missing 'chain' array for chain execution".to_string()))?;
+
+                    let mut chain = Vec::new();
+                    for step in chain_val {
+                        let agent = step.get("agent").and_then(|a| a.as_str()).unwrap_or("scout").to_string();
+                        let task_text = step.get("task").and_then(|t| t.as_str()).unwrap_or("").to_string();
+                        chain.push(crate::agent::AgentTask {
+                            agent,
+                            task: task_text,
+                            workspace_mode,
+                        });
+                    }
+
+                    let handbacks = crate::agent::AgentRunner::run_chain(
+                        workspace_root,
+                        chain,
+                        provider,
+                    ).await;
+
+                    let mut card_out = format!("### Chained Pipeline Execution Report ({} steps)\n\n", handbacks.len());
+                    for h in handbacks {
+                        card_out.push_str(&h.format_handback_card());
+                        card_out.push_str("\n\n");
+                    }
+                    Ok(card_out.trim().to_string())
+                }
+                _ => {
+                    let agent = call_args.get("agent")
+                        .and_then(|a| a.as_str())
+                        .unwrap_or("scout");
+                    let task_text = call_args.get("task")
+                        .and_then(|t| t.as_str())
+                        .ok_or_else(|| ToolError::InvalidArguments("Missing 'task'".to_string()))?;
+
+                    let task = crate::agent::AgentTask {
+                        agent: agent.to_string(),
+                        task: task_text.to_string(),
+                        workspace_mode,
+                    };
+
+                    let handback = crate::agent::AgentRunner::run_single(
+                        workspace_root,
+                        task,
+                        provider,
+                    ).await;
+
+                    Ok(handback.format_handback_card())
+                }
+            }
+        })
     }
 }
 

@@ -1,3 +1,4 @@
+pub mod agent;
 pub mod config;
 pub mod context;
 pub mod events;
@@ -13,6 +14,7 @@ pub mod session;
 pub mod skills;
 pub mod tools;
 
+pub use agent::{AgentConfig, AgentDiscovery, AgentRole, AgentRunner, AgentSource, AgentTask, AgentTopology, SubagentHandback, SubagentStatus, WorkspaceMode};
 pub use config::{ColorMode, ConfigError, DisplayMode, NexusConfig};
 pub use context::{ContextBudget, ContextSummary, InterruptedOutputManager, MacroCompactor};
 pub use events::NexusEvent;

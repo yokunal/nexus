@@ -515,6 +515,37 @@ impl TuiRenderer {
                     theme.reset
                 );
             }
+            "invoke_subagent" => {
+                let agent = args.get("agent").or_else(|| args.get("Agent")).and_then(|v| v.as_str()).unwrap_or("worker");
+                let topology = args.get("topology").and_then(|v| v.as_str()).unwrap_or("single");
+                let task = args.get("task").or_else(|| args.get("Task")).and_then(|v| v.as_str()).unwrap_or("");
+                println!(
+                    "{}╭─ {}🤖 Subagent Spawn:{} {}{} {}[{}] (topology: {}){}",
+                    theme.border_accent,
+                    theme.purple,
+                    theme.bold,
+                    theme.text_primary,
+                    agent,
+                    theme.brand_glow,
+                    topology,
+                    topology,
+                    theme.reset
+                );
+                for line in task.lines().take(2) {
+                    println!("{}│{}   {}{}", theme.border_accent, theme.reset, line, theme.reset);
+                }
+                println!("{}╰───────────────────────────────────────────────────{}", theme.border_accent, theme.reset);
+            }
+            "list_agents" => {
+                println!(
+                    "{}╭─ {}🤖 Subagent Roster Query:{} Discovering Agents {}{}",
+                    theme.border_accent,
+                    theme.purple,
+                    theme.bold,
+                    theme.text_secondary,
+                    theme.reset
+                );
+            }
             other => {
                 println!(
                     "{}╭─ {}⟡ Tool Invocation:{} {}{}{}",
@@ -536,6 +567,21 @@ impl TuiRenderer {
         } else {
             ("✗", theme.error)
         };
+
+        if name == "invoke_subagent" {
+            println!(
+                "{}╭─ {}🤖 Subagent Complete [{}]{}",
+                theme.border_accent,
+                theme.purple,
+                if success { "Success" } else { "Failed" },
+                theme.reset
+            );
+            for l in output.lines().take(4) {
+                println!("{}│{}  {}{}", theme.border_accent, theme.reset, l, theme.reset);
+            }
+            println!("{}╰───────────────────────────────────────────────────{}", theme.border_accent, theme.reset);
+            return;
+        }
 
         if name == "run_command" || name == "cargo_check" {
             // Print output trimmed with border

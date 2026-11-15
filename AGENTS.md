@@ -7,4 +7,5 @@
 - **Strict Path Containment**: Every file operation must resolve within the workspace boundary; path traversal (`../`, absolute escapes) must be blocked by the sandbox.
 - **Turn-Level Git Snapshot**: In git workspaces, capture exactly 1 lightweight snapshot per agent turn before executing modifying tools.
 - **Defense-in-Depth Quarantine**: Destructive shell patterns are blacklisted and environment variables scrubbed (`GITHUB_TOKEN`, `SSH_AUTH_SOCK`, `HTTP_PROXY`, API keys). The interactive user prompt remains the true security gate.
+- **Subagent Context Isolation & Zero Intermediate Token Leakage**: Subagents execute in isolated context windows and return compact `<subagent_handback>` cards to coordinators. Subagents are strictly blocked from invoking subagents (`invoke_subagent` blocked) to eliminate fork bombs.
 - **Lean Runtime Footprint**: Release binary must remain ultra-lean (<15MB), fast startup (<0.02s), and 0% CPU idle.

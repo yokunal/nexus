@@ -1,4 +1,5 @@
 use clap::Parser;
+use nexus_core::agent::{AgentDiscovery, AgentSource};
 use nexus_core::config::{ColorMode, DisplayMode, NexusConfig};
 use nexus_core::context::{ContextBudget, InterruptedOutputManager, MacroCompactor};
 use nexus_core::events::NexusEvent;
@@ -392,7 +393,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 tool_manager_builder.with_lsp_client(Arc::new(tokio::sync::Mutex::new(client)));
         }
     }
-    let tool_manager = Arc::new(tool_manager_builder);
 
     // Initialize dynamic Skill Watcher
     let (skill_tx, mut skill_rx) = mpsc::channel(16);
@@ -457,7 +457,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         provider_builder = provider_builder.with_base_url(b.clone());
     }
 
-    let provider = Arc::new(provider_builder);
+    let provider: Arc<dyn LlmProvider> = Arc::new(provider_builder);
+    let tool_manager = Arc::new(tool_manager_builder.with_provider(provider.clone()));
     let tool_defs = ToolManager::tool_definitions();
 
     // Load architecture invariants from AGENTS.md (or default standards)
@@ -579,6 +580,7 @@ Your workspace is at: {}.
                 "  /qa                     - Run automated QA loop (check, test, fix, re-verify)"
             );
             println!("  /ship                   - Run pre-landing ship verification (clean tree, clippy, test gate)");
+            println!("  /agents                 - List registered subagent roster (scout, planner, reviewer, worker)");
             println!("  /skills                 - List all loaded permanent and staged skills");
             println!("  /promote <name>         - Promote a staged skill to permanent storage");
             println!("  /discard <name>         - Discard a staged skill from sandbox quarantine");
@@ -756,6 +758,35 @@ Your workspace is at: {}.
                     }
                 }
             }
+            continue;
+        }
+
+        if trimmed == "/agents" {
+            let agents = AgentDiscovery::discover_agents(&workspace_dir);
+            println!("{}╭─ 🤖 Nexus Subagent Orchestration Roster ──────────────────{}", theme.border, theme.reset);
+            println!("{}│{} Active Agents: {} registered (Single, Parallel, Chain)", theme.border, theme.reset, agents.len());
+            for a in &agents {
+                let source_tag = match a.source {
+                    AgentSource::Builtin => "\x1b[1;34m[BUILTIN]\x1b[0m",
+                    AgentSource::Project => "\x1b[1;32m[PROJECT]\x1b[0m",
+                    AgentSource::User => "\x1b[1;35m[USER]\x1b[0m",
+                };
+                let tools_str = if a.tools.is_empty() {
+                    "all tools".to_string()
+                } else {
+                    a.tools.join(", ")
+                };
+                println!(
+                    "{}│{}  • \x1b[1m{:<10}\x1b[0m {} (Role: \x1b[0;33m{:?}\x1b[0m) | Allowed Tools: [{}]",
+                    theme.border, theme.reset, a.name, source_tag, a.role, tools_str
+                );
+                println!(
+                    "{}│{}    {}{}{}",
+                    theme.border, theme.reset, theme.text_secondary, a.description, theme.reset
+                );
+            }
+            println!("{}│{} Invoke autonomously via `invoke_subagent` tool with topology: single | parallel | chain", theme.border, theme.reset);
+            println!("{}╰──────────────────────────────────────────────────────────{}", theme.border, theme.reset);
             continue;
         }
 
