@@ -253,3 +253,86 @@ fn test_step5_memory_recall_and_benchmark() {
     );
     println!("\x1b[1;32m✓ Step 5 PASSED: Instant sub-millisecond cross-session recall confirmed!\x1b[0m\n");
 }
+
+#[test]
+fn test_step6_context_engineering_compaction_and_continuation() {
+    println!("\n\x1b[1;36m=== STEP 6: Native Context Engineering, Compaction & Continuation ===\x1b[0m");
+    use nexus_core::context::{ContextBudget, MacroCompactor, InterruptedOutputManager};
+    use nexus_core::session::{SessionStore, Message};
+    use chrono::Utc;
+
+    // 1. ContextBudget & Pill formatting
+    let budget = ContextBudget::new(128_000, 0.75);
+    assert_eq!(budget.threshold_tokens(), 96_000);
+    assert!(!budget.is_above_threshold(95_999));
+    assert!(budget.is_above_threshold(96_000));
+    assert_eq!(budget.format_short_pill(50_000), "🗜️ 50.0k/128k");
+    println!("✓ Context budget threshold and status pill formatting verified");
+
+    // 2. MacroCompaction & Session persistence rewrite
+    let db_path = std::env::temp_dir().join(format!("nexus_context_test_{}.db", Uuid::new_v4()));
+    let store = SessionStore::new(&db_path).unwrap();
+    let session = store.create_session("Context Compaction Session").unwrap();
+
+    let mut history = Vec::new();
+    for i in 1..=12 {
+        let msg = Message {
+            role: if i % 2 == 1 { "user".to_string() } else { "assistant".to_string() },
+            content: format!(
+                "Iteration {}: Inspecting module components and build logs.\n\
+                 pub fn execute_work_{}() {{\n    \
+                     let mut v = Vec::new();\n    \
+                     for item in 0..100 {{\n        \
+                         v.push(format!(\"data_{{}}\", item));\n    \
+                     }}\n    \
+                     assert_eq!(v.len(), 100);\n\
+                 }}\n\
+                 Detailed diagnostic log stream for turn {}:\n\
+                 Compiling crate module v0.1.0\n\
+                 Checking dependencies...\n\
+                 Analyzing borrow invariants and lifecycle constraints...\n\
+                 Target compiled successfully with 0 warnings.\n\
+                 Compiler reports: zero errors, proceeding to next phase.",
+                i, i, i
+            ),
+            tool_calls: None,
+            tool_results: None,
+            timestamp: Utc::now(),
+        };
+        store.save_message(&session.id, &msg).unwrap();
+        history.push(msg);
+    }
+
+    let temp_workspace = std::env::temp_dir();
+    let (compacted_history, summary) = MacroCompactor::compact_history(
+        &history,
+        &temp_workspace,
+        Some("Refactor compilation pipeline"),
+        2,
+    );
+
+    assert_eq!(compacted_history.len(), 3); // 1 summary + 2 preserved
+    assert!(compacted_history[0].content.contains("<context_summary>"));
+    assert!(compacted_history[0].content.contains("Refactor compilation pipeline"));
+    assert_eq!(summary.compacted_turns_count, 10);
+    assert!(summary.pre_compact_tokens > summary.post_compact_tokens);
+    assert!(summary.reduction_percentage() > 50.0);
+
+    store.rewrite_session_messages(&session.id, &compacted_history).unwrap();
+    let reloaded = store.load_session(&session.id).unwrap();
+    assert_eq!(reloaded.messages.len(), 3);
+    assert!(reloaded.messages[0].content.contains("<context_summary>"));
+    println!("✓ Macro-compaction token reduction ({:.1}%) and SQLite atomic rewrite verified", summary.reduction_percentage());
+
+    // 3. Interrupted Output Continuation
+    let partial_stream = "pub fn calculate_hash() -> u64 {\n    let mut hasher = DefaultHasher::new();";
+    let fenced = InterruptedOutputManager::wrap_interrupted_output(partial_stream);
+    assert!(fenced.contains("<interrupted-output>"));
+    assert!(fenced.contains("pub fn calculate_hash()"));
+    let extracted = InterruptedOutputManager::extract_interrupted_output(&fenced);
+    assert_eq!(extracted, Some(partial_stream.to_string()));
+    println!("✓ Interrupted output wrapping and extraction verified");
+
+    let _ = std::fs::remove_file(&db_path);
+    println!("\x1b[1;32m✓ Step 6 PASSED: End-to-end Context Engineering Engine verified!\x1b[0m\n");
+}

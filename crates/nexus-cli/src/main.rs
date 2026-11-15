@@ -1,5 +1,6 @@
 use clap::Parser;
 use nexus_core::config::{ColorMode, DisplayMode, NexusConfig};
+use nexus_core::context::{ContextBudget, InterruptedOutputManager, MacroCompactor};
 use nexus_core::events::NexusEvent;
 use nexus_core::git::GitSnapshotManager;
 use nexus_core::gstack::{GStackEngine, GStackReviewMode};
@@ -488,6 +489,8 @@ Your workspace is at: {}.
     }
 
     let mut session_tokens = nexus_core::events::TokenUsage::default();
+    let context_budget = ContextBudget::default();
+    let mut pending_interrupted_output: Option<String> = None;
 
     loop {
         // Non-blocking check for hotloaded skill notifications
@@ -498,11 +501,19 @@ Your workspace is at: {}.
             );
         }
 
+        let cur_tokens = MacroCompactor::estimate_history_tokens(&session.messages);
+        let short_pill = if cur_tokens > 0 {
+            Some(context_budget.format_short_pill(cur_tokens))
+        } else {
+            None
+        };
+
         trim_working_set();
         TuiRenderer::render_prompt(
             &workspace_dir,
             git_branch.as_deref(),
             get_process_memory_kb(),
+            short_pill.as_deref(),
             &theme,
         );
         io::stdout().flush()?;
@@ -555,6 +566,9 @@ Your workspace is at: {}.
             println!("\x1b[1;33mAvailable Commands:\x1b[0m");
             println!("  !<command>              - Execute shell command directly in workspace (zero API tokens)");
             println!("  /doctor                 - Run compiler diagnostic check and trigger targeted repair");
+            println!("  /compact [focus]        - Compact session turns into structured summary (<context_summary>)");
+            println!("  /context                - Show context window usage, capacity, and auto-compact threshold");
+            println!("  /continue               - Resume interrupted generation using <interrupted-output> fence");
             println!("  /theme [name]           - Switch visual palette (claude, cyberpunk, tokyo, amber, nordic, light, plain)");
             println!("  /tokens                 - Show real-time prompt cache hit rate and token efficiency metrics");
             println!("  /setup                  - Reconfigure color mode, display mode, provider, and model");
@@ -669,6 +683,61 @@ Your workspace is at: {}.
 
         if trimmed == "/tokens" || trimmed == "/cost" {
             TuiRenderer::render_token_dashboard(&session_tokens, &theme);
+            continue;
+        }
+
+        if trimmed == "/compact" || trimmed.starts_with("/compact ") {
+            let arg = trimmed.strip_prefix("/compact").unwrap_or("").trim();
+            let focus = if arg.is_empty() { None } else { Some(arg) };
+            println!("{}╭─ 🗜️ Nexus Context Compactor ───────────────────────────{}", theme.border, theme.reset);
+            let current_tokens = MacroCompactor::estimate_history_tokens(&session.messages);
+            println!(
+                "{}│{} Current history: {} messages (~{} tokens)",
+                theme.border, theme.reset, session.messages.len(), current_tokens
+            );
+            if session.messages.is_empty() {
+                println!("{}│{} History is empty, nothing to compact.{}", theme.border, theme.reset, theme.reset);
+                println!("{}╰──────────────────────────────────────────────────────────{}", theme.border, theme.reset);
+                continue;
+            }
+
+            let (new_history, summary) = MacroCompactor::compact_history(
+                &session.messages,
+                &workspace_dir,
+                focus,
+                2,
+            );
+
+            session.messages = new_history;
+            if let Err(err) = session_store.rewrite_session_messages(&session.id, &session.messages) {
+                eprintln!("{}│{} Warning: Failed to persist compacted session: {}{}", theme.border, theme.reset, err, theme.reset);
+            }
+
+            println!(
+                "{}│{} \x1b[1;32m✓ Compacted {} turns into synthesized boundary\x1b[0m",
+                theme.border, theme.reset, summary.compacted_turns_count
+            );
+            println!(
+                "{}│{} Tokens: {} → {} ({:.1}% reduction)",
+                theme.border, theme.reset,
+                summary.pre_compact_tokens,
+                summary.post_compact_tokens,
+                summary.reduction_percentage()
+            );
+            println!("{}╰──────────────────────────────────────────────────────────{}", theme.border, theme.reset);
+            continue;
+        }
+
+        if trimmed == "/context" || trimmed == "/budget" {
+            let current_tokens = MacroCompactor::estimate_history_tokens(&session.messages);
+            let pill = context_budget.format_status_pill(current_tokens);
+            println!("{}╭─ 🧠 Nexus Context Engineering ─────────────────────────{}", theme.border, theme.reset);
+            println!("{}│{} Context Utilization: {}", theme.border, theme.reset, pill);
+            println!("{}│{} Active Turns:       {} messages", theme.border, theme.reset, session.messages.len());
+            println!("{}│{} Window Capacity:    {} tokens", theme.border, theme.reset, context_budget.window_capacity);
+            println!("{}│{} Auto-compact at:    {} tokens ({:.0}%)", theme.border, theme.reset, context_budget.threshold_tokens(), context_budget.compact_threshold_pct * 100.0);
+            println!("{}│{} Manual Compaction:  Run /compact [optional focus]", theme.border, theme.reset);
+            println!("{}╰──────────────────────────────────────────────────────────{}", theme.border, theme.reset);
             continue;
         }
 
@@ -948,6 +1017,16 @@ Your workspace is at: {}.
                     _ => "Perform pre-landing verification: check git status, test coverage, clippy warnings, and docs/changelog.".to_string(),
                 }
             }
+            "/continue" | "/resume" => {
+                if let Some(interrupted) = pending_interrupted_output.take() {
+                    println!("{}╭─ ⟡ Resuming Interrupted Turn ─────────────────────────{}", theme.border, theme.reset);
+                    println!("{}│{} Restoring interrupted state with continuation fence...", theme.border, theme.reset);
+                    println!("{}╰──────────────────────────────────────────────────────────{}", theme.border, theme.reset);
+                    InterruptedOutputManager::wrap_interrupted_output(&interrupted)
+                } else {
+                    "Please continue the task from where you left off.".to_string()
+                }
+            }
             _ => {
                 // Check if cmd_word matches any registered plugin command
                 let matching_plugin_cmd = if let Some(cmd_name) = cmd_word.strip_prefix('/') {
@@ -989,10 +1068,51 @@ Your workspace is at: {}.
             }
         };
 
+        let mut final_prompt = prompt_to_send;
+        if let Some(interrupted) = pending_interrupted_output.take() {
+            final_prompt = format!(
+                "{}\n\n{}",
+                InterruptedOutputManager::wrap_interrupted_output(&interrupted),
+                final_prompt
+            );
+        }
+
+        // Auto-compaction check: if history tokens exceed threshold (75% of 128k = 96k),
+        // automatically compact older turns while preserving the last 2 turns.
+        if MacroCompactor::should_auto_compact(&session.messages, &context_budget) {
+            println!(
+                "{}╭─ 🗜️ Context Limit Approaching ────────────────────────{}\n{}│{} History reached {:.1}% of capacity. Compacting older turns...\n{}╰──────────────────────────────────────────────────────────{}",
+                theme.border, theme.reset,
+                theme.border, theme.reset,
+                context_budget.usage_percentage(MacroCompactor::estimate_history_tokens(&session.messages)),
+                theme.border, theme.reset
+            );
+            let (new_history, summary) = MacroCompactor::compact_history(
+                &session.messages,
+                &workspace_dir,
+                None,
+                2,
+            );
+            session.messages = new_history;
+            if let Err(err) = session_store.rewrite_session_messages(&session.id, &session.messages) {
+                eprintln!("Warning: Failed to persist auto-compacted session: {}", err);
+            }
+            println!(
+                "{}│{} Auto-compacted {} turns ({} → {} tokens, {:.1}% saved){}",
+                theme.border,
+                theme.reset,
+                summary.compacted_turns_count,
+                summary.pre_compact_tokens,
+                summary.post_compact_tokens,
+                summary.reduction_percentage(),
+                theme.reset
+            );
+        }
+
         // Add user message to session and index in memory
         let user_msg = Message {
             role: "user".to_string(),
-            content: prompt_to_send.to_string(),
+            content: final_prompt,
             tool_calls: None,
             tool_results: None,
             timestamp: chrono::Utc::now(),
@@ -1033,6 +1153,7 @@ Your workspace is at: {}.
                     .await
             });
 
+            let mut current_turn_text = String::new();
             TuiRenderer::render_ai_prefix(&theme);
             io::stdout().flush()?;
 
@@ -1041,6 +1162,7 @@ Your workspace is at: {}.
                     NexusEvent::TokenChunk(chunk) => {
                         print!("{}", chunk);
                         io::stdout().flush()?;
+                        current_turn_text.push_str(&chunk);
                     }
                     NexusEvent::ToolCallStarted(ref call) => {
                         TuiRenderer::render_tool_call_start(&call.name, &call.arguments, &theme);
@@ -1061,6 +1183,13 @@ Your workspace is at: {}.
                 Ok(msg) => msg,
                 Err(err) => {
                     eprintln!("{}Provider Error: {}{}", theme.error, err, theme.reset);
+                    if !current_turn_text.trim().is_empty() {
+                        pending_interrupted_output = Some(current_turn_text);
+                        eprintln!(
+                            "{}Turn interrupted with partial output. Type /continue to resume without losing progress.{}",
+                            theme.warning, theme.reset
+                        );
+                    }
                     break;
                 }
             };
@@ -1114,7 +1243,9 @@ Your workspace is at: {}.
             }
         }
 
-        TuiRenderer::render_turn_footer(get_process_memory_kb(), last_turn_usage.as_ref(), &theme);
+        let cur_tokens = MacroCompactor::estimate_history_tokens(&session.messages);
+        let pill = context_budget.format_status_pill(cur_tokens);
+        TuiRenderer::render_turn_footer(get_process_memory_kb(), last_turn_usage.as_ref(), Some(&pill), &theme);
     }
 
     Ok(())

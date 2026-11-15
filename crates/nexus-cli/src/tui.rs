@@ -393,6 +393,7 @@ impl TuiRenderer {
         workspace: &Path,
         git_branch: Option<&str>,
         memory_kb: Option<usize>,
+        context_pill: Option<&str>,
         theme: &ThemePalette,
     ) {
         let ws_str = workspace.file_name()
@@ -409,14 +410,20 @@ impl TuiRenderer {
             None => "~3.9 MB".to_string(),
         };
 
+        let ctx_chip = match context_pill {
+            Some(p) => format!(" · {}{}{}", theme.warning, p, theme.reset),
+            None => "".to_string(),
+        };
+
         println!(
-            "{}╭─ {}{}{}{} {}· {}{}{} · {}{}idle{}",
+            "{}╭─ {}{}{}{}{}{} · {}{}{} · {}{}idle{}",
             theme.border,
             theme.text_primary,
             theme.bold,
             ws_str,
             theme.reset,
             branch_chip,
+            ctx_chip,
             theme.info,
             mem_str,
             theme.reset,
@@ -573,10 +580,11 @@ impl TuiRenderer {
         );
     }
 
-    /// Render turn completed footer chip with RAM and token efficiency metrics
+    /// Render turn completed footer chip with RAM, token metrics, and context status
     pub fn render_turn_footer(
         memory_kb: Option<usize>,
         token_usage: Option<&nexus_core::events::TokenUsage>,
+        context_pill: Option<&str>,
         theme: &ThemePalette,
     ) {
         let mem_str = match memory_kb {
@@ -612,6 +620,11 @@ impl TuiRenderer {
             _ => "".to_string(),
         };
 
+        let context_chip = match context_pill {
+            Some(pill) => format!(" · {}{}{}", theme.text_secondary, pill, theme.reset),
+            None => "".to_string(),
+        };
+
         println!(
             "\n{}─── {}⟡ Turn finished{} {}· RAM: {} · CPU: 0.0%{}{} ───{}{}\n",
             theme.border,
@@ -619,8 +632,8 @@ impl TuiRenderer {
             theme.reset,
             theme.text_dim,
             mem_str,
-            theme.text_dim,
             token_chip,
+            context_chip,
             theme.border,
             theme.reset
         );

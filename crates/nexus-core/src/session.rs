@@ -138,6 +138,55 @@ impl SessionStore {
         Ok(())
     }
 
+    /// Atomically replaces all messages for a session (used by context compactor).
+    pub fn rewrite_session_messages(
+        &self,
+        session_id: &str,
+        messages: &[Message],
+    ) -> Result<(), SessionError> {
+        let mut conn = self.connect()?;
+        let tx = conn.transaction()?;
+
+        tx.execute(
+            "DELETE FROM messages WHERE session_id = ?1",
+            params![session_id],
+        )?;
+
+        for msg in messages {
+            let calls_json = msg
+                .tool_calls
+                .as_ref()
+                .map(serde_json::to_string)
+                .transpose()?;
+            let results_json = msg
+                .tool_results
+                .as_ref()
+                .map(serde_json::to_string)
+                .transpose()?;
+
+            tx.execute(
+                "INSERT INTO messages (session_id, role, content, tool_calls, tool_results, timestamp)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                params![
+                    session_id,
+                    msg.role,
+                    msg.content,
+                    calls_json,
+                    results_json,
+                    msg.timestamp.to_rfc3339()
+                ],
+            )?;
+        }
+
+        tx.execute(
+            "UPDATE sessions SET updated_at = ?1 WHERE id = ?2",
+            params![Utc::now().to_rfc3339(), session_id],
+        )?;
+
+        tx.commit()?;
+        Ok(())
+    }
+
     pub fn load_session(&self, session_id: &str) -> Result<Session, SessionError> {
         let conn = self.connect()?;
 
@@ -263,6 +312,19 @@ mod tests {
         assert_eq!(loaded.messages[0].content, "Hello Nexus");
         assert_eq!(loaded.messages[1].role, "assistant");
         assert_eq!(loaded.messages[1].content, "Hello Boss");
+
+        // Test rewrite_session_messages
+        let compacted_msg = Message {
+            role: "user".to_string(),
+            content: "Compacted summary".to_string(),
+            tool_calls: None,
+            tool_results: None,
+            timestamp: Utc::now(),
+        };
+        store.rewrite_session_messages(&session.id, &[compacted_msg]).unwrap();
+        let reloaded = store.load_session(&session.id).unwrap();
+        assert_eq!(reloaded.messages.len(), 1);
+        assert_eq!(reloaded.messages[0].content, "Compacted summary");
 
         let _ = std::fs::remove_file(&temp_db);
     }

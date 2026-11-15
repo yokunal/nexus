@@ -68,6 +68,38 @@ impl GitSnapshotManager {
         Ok(!stdout.trim().is_empty())
     }
 
+    /// Returns git diff summary (`git diff --stat`) and porcelain status.
+    pub fn get_diff_summary(workspace: &Path) -> Result<String, GitError> {
+        if !Self::is_git_repo(workspace) {
+            return Ok(String::new());
+        }
+        let status_out = Command::new("git")
+            .arg("status")
+            .arg("--short")
+            .current_dir(workspace)
+            .output()?;
+        let status = String::from_utf8_lossy(&status_out.stdout).trim().to_string();
+
+        let diff_out = Command::new("git")
+            .arg("diff")
+            .arg("--stat")
+            .current_dir(workspace)
+            .output()?;
+        let diff_stat = String::from_utf8_lossy(&diff_out.stdout).trim().to_string();
+
+        let mut summary = String::new();
+        if !status.is_empty() {
+            summary.push_str("Modified/Untracked files:\n");
+            summary.push_str(&status);
+            summary.push('\n');
+        }
+        if !diff_stat.is_empty() {
+            summary.push_str("Diff stat:\n");
+            summary.push_str(&diff_stat);
+        }
+        Ok(summary)
+    }
+
     /// Creates a non-destructive turn snapshot before an agent turn executes tools.
     /// Uses `git stash create` or `HEAD` SHA.
     ///
