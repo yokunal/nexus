@@ -226,7 +226,7 @@ fn run_setup_wizard() -> io::Result<NexusConfig> {
 
     let (api_key, base_url, mut default_model) = match choice.trim() {
         "2" => {
-            print!("\nEnter Google Gemini API Key (AIzaSy...): ");
+            print!("\nEnter Google Gemini API Key (AQ... or AIzaSy...): ");
             io::stdout().flush()?;
             let mut key_input = String::new();
             reader.read_line(&mut key_input)?;
