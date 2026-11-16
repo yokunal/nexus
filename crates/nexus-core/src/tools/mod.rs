@@ -812,15 +812,19 @@ mod tests {
 
     #[tokio::test]
     async fn test_cargo_check_tool_execution() {
-        // Run cargo check on current workspace
-        let workspace = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .parent()
-            .unwrap()
-            .parent()
-            .unwrap()
-            .to_path_buf();
+        // Run cargo check on an isolated temporary project to avoid cargo target lock contention
+        let temp_dir = std::env::temp_dir().join(format!("nexus_check_tool_test_{}", uuid::Uuid::new_v4()));
+        let _ = std::fs::create_dir_all(temp_dir.join("src"));
+        let _ = std::fs::write(
+            temp_dir.join("Cargo.toml"),
+            "[package]\nname = \"tool_test_proj\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
+        );
+        let _ = std::fs::write(
+            temp_dir.join("src/main.rs"),
+            "fn main() { println!(\"hello\"); }\n",
+        );
 
-        let sandbox = Sandbox::new(&workspace, false).unwrap();
+        let sandbox = Sandbox::new(&temp_dir, false).unwrap();
         let manager = ToolManager::new(sandbox);
 
         let check_call = ToolCall {
@@ -832,6 +836,8 @@ mod tests {
         let res = manager.execute(&check_call).await;
         assert!(!res.is_error);
         assert!(res.output.contains("Rust Check Passed") || res.output.contains("Diagnostic"));
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
     }
 
     #[tokio::test]

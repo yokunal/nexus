@@ -169,9 +169,12 @@ mod tests {
 
     #[test]
     fn test_git_repo_detection() {
-        // /home/ubuntu/nexus is an active git repo
-        let nexus_dir = Path::new("/home/ubuntu/nexus");
-        assert!(GitSnapshotManager::is_git_repo(nexus_dir));
+        let repo_root = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap();
+        assert!(GitSnapshotManager::is_git_repo(repo_root));
 
         let non_git = std::env::temp_dir();
         // Temp dir may or may not be git repo, but won't crash
@@ -180,9 +183,13 @@ mod tests {
 
     #[test]
     fn test_create_turn_snapshot() {
-        let nexus_dir = Path::new("/home/ubuntu/nexus");
+        let repo_root = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap();
         let snapshot =
-            GitSnapshotManager::create_turn_snapshot(nexus_dir, "test-turn-123").unwrap();
+            GitSnapshotManager::create_turn_snapshot(repo_root, "test-turn-123").unwrap();
         assert!(snapshot.is_some());
         let snap = snapshot.unwrap();
         assert_eq!(snap.turn_id, "test-turn-123");

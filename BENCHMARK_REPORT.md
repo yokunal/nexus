@@ -1,6 +1,6 @@
 # Nexus Local Offline Benchmark Report
 
-> Generated on `2026-11-02 01:02:48 UTC`
+> Generated on `2026-11-16 01:12:14 UTC`
 > Run Environment: **100% Local Offline (Zero Internet Exposure)**
 
 ## Summary Scorecard
@@ -20,9 +20,9 @@
 | Category | Benchmark Name | Latency | Status | Details |
 |---|---|---|---|---|
 | `Patcher` | Tier 1: Exact Match Patching | `0.05 ms` | ✅ PASS | Patch verified cleanly |
-| `Patcher` | Tier 2: Whitespace & Indentation Invariance | `0.05 ms` | ✅ PASS | Patch verified cleanly |
-| `Patcher` | Tier 3: Multi-line Anchor Context Patching | `0.05 ms` | ✅ PASS | Patch verified cleanly |
-| `Patcher` | Ambiguity Guard: Collision Prevention | `0.01 ms` | ✅ PASS | Ambiguity Guard intercepted 2 duplicate occurrences |
+| `Patcher` | Tier 2: Whitespace & Indentation Invariance | `0.07 ms` | ✅ PASS | Patch verified cleanly |
+| `Patcher` | Tier 3: Multi-line Anchor Context Patching | `0.04 ms` | ✅ PASS | Patch verified cleanly |
+| `Patcher` | Ambiguity Guard: Collision Prevention | `0.00 ms` | ✅ PASS | Ambiguity Guard intercepted 2 duplicate occurrences |
 | `RustSpecialist` | Rust Doctor: Borrow of Moved Value (E0382) | `0.00 ms` | ✅ PASS | Generated compiler repair advice for E0382 |
 | `RustSpecialist` | Rust Doctor: Simultaneous Borrow Conflict (E0502) | `0.00 ms` | ✅ PASS | Generated compiler repair advice for E0502 |
 | `Security` | Path Traversal Containment (../../etc/shadow) | `0.00 ms` | ✅ PASS | Containment boundary verified |

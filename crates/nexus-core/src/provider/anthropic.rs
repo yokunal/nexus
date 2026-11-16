@@ -368,12 +368,12 @@ impl LlmProvider for AnthropicProvider {
             let tool_json_chars: usize = tool_calls.iter().map(|tc| tc.arguments.to_string().len()).sum();
             let total_out = full_text.len() + tool_json_chars;
             if total_out > 0 {
-                usage.output_tokens = ((total_out + 3) / 4).max(1) as u32;
+                usage.output_tokens = total_out.div_ceil(4).max(1) as u32;
             }
         }
         if usage.input_tokens == 0 {
             let est_input_chars: usize = history.iter().map(|m| m.content.len()).sum();
-            usage.input_tokens = ((est_input_chars + system_prompt.len() + 3) / 4).max(10) as u32;
+            usage.input_tokens = (est_input_chars + system_prompt.len()).div_ceil(4).max(10) as u32;
         }
 
         let _ = event_tx.send(NexusEvent::TokenUsageRecorded(usage)).await;

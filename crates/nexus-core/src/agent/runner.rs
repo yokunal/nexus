@@ -12,17 +12,12 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::{mpsc, Semaphore};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum WorkspaceMode {
+    #[default]
     Inherit,
     Worktree,
-}
-
-impl Default for WorkspaceMode {
-    fn default() -> Self {
-        Self::Inherit
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -206,14 +201,31 @@ impl AgentRunner {
             }
         }
 
-        if final_output.is_empty() && subagent_status == SubagentStatus::Success {
-            if let Some(last) = messages.iter().rev().find(|m| m.role == "assistant") {
+        if final_output.trim().is_empty() && subagent_status == SubagentStatus::Success {
+            if let Some(last) = messages.iter().rev().find(|m| m.role == "assistant" && !m.content.trim().is_empty()) {
                 final_output = last.content.clone();
+            } else {
+                let tools_list = if tools_used.is_empty() {
+                    "none".to_string()
+                } else {
+                    tools_used.join(", ")
+                };
+                final_output = format!(
+                    "Subagent '{}' completed {} turn(s) with tools: [{}].",
+                    agent.name,
+                    turns_taken,
+                    tools_list
+                );
             }
         }
 
         if use_worktree {
-            let _ = GitWorktreeManager::cleanup_worktree(&workspace_dir, &target_workspace, branch_name.as_deref());
+            if let Ok(Some(preserved_branch)) = GitWorktreeManager::cleanup_worktree(&workspace_dir, &target_workspace, branch_name.as_deref()) {
+                final_output.push_str(&format!(
+                    "\n\n> 🌿 **Worktree Preserved**: Subagent committed changes to branch `{}`. Run `git merge {}` to integrate.",
+                    preserved_branch, preserved_branch
+                ));
+            }
         }
 
         SubagentHandback {

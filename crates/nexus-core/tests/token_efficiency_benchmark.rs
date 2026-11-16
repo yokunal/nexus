@@ -18,12 +18,12 @@ fn count_tokens(text: &str) -> usize {
         if word.len() <= 4 {
             token_estimate += 1;
         } else {
-            token_estimate += (word.len() + 3) / 4;
+            token_estimate += word.len().div_ceil(4);
         }
     }
     // Account for punctuation & symbols that create token boundaries
     let punct_count = text.chars().filter(|c| "{}[],:;\"'=><()!/\\".contains(*c)).count();
-    let char_floor = (text.len() + 3) / 4;
+    let char_floor = text.len().div_ceil(4);
     token_estimate.max(char_floor).max((punct_count * 2 / 3) + 1)
 }
 
@@ -620,7 +620,12 @@ fn test_token_efficiency_against_claude_code() {
     report.push_str("4. **Anthropic Ephemeral Prompt Caching**:\n");
     report.push_str("   - Cache breakpoints on system prompt, tool definitions, and latest turn deliver 90% cost discounts on recurring context.\n");
 
-    let report_path = Path::new("/home/ubuntu/nexus/TOKEN_EFFICIENCY_REPORT.md");
-    fs::write(report_path, report).expect("Failed to write TOKEN_EFFICIENCY_REPORT.md");
-    println!(" Successfully generated /home/ubuntu/nexus/TOKEN_EFFICIENCY_REPORT.md");
+    let report_path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap()
+        .parent()
+        .unwrap()
+        .join("TOKEN_EFFICIENCY_REPORT.md");
+    fs::write(&report_path, report).expect("Failed to write TOKEN_EFFICIENCY_REPORT.md");
+    println!(" Successfully generated {:?}", report_path);
 }

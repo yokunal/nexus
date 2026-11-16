@@ -154,14 +154,14 @@ impl MacroCompactor {
             if word.len() <= 4 {
                 count += 1;
             } else {
-                count += (word.len() + 3) / 4;
+                count += word.len().div_ceil(4);
             }
         }
         let punct_count = text
             .chars()
             .filter(|c| "{}[],:;\"'=><()!/\\#*`-_".contains(*c))
             .count();
-        let char_floor = (text.len() + 3) / 4;
+        let char_floor = text.len().div_ceil(4);
         (count.max(char_floor).max((punct_count * 2 / 3) + 1)) as u32
     }
 

@@ -17,16 +17,20 @@ pub struct ReaBridge;
 impl ReaBridge {
     /// Detects if `rea` binary is available on the system.
     pub fn detect_rea() -> Option<PathBuf> {
-        let candidates = [
-            "/home/ubuntu/.local/bin/rea",
-            "/usr/local/bin/rea",
-            "/usr/bin/rea",
+        let mut candidates = vec![
+            PathBuf::from("/usr/local/bin/rea"),
+            PathBuf::from("/usr/bin/rea"),
         ];
 
+        if let Ok(home) = std::env::var("HOME") {
+            candidates.insert(0, PathBuf::from(home).join(".local/bin/rea"));
+        } else if let Ok(profile) = std::env::var("USERPROFILE") {
+            candidates.insert(0, PathBuf::from(profile).join(".local/bin/rea"));
+        }
+
         for path in &candidates {
-            let p = PathBuf::from(path);
-            if p.exists() {
-                return Some(p);
+            if path.exists() {
+                return Some(path.clone());
             }
         }
 
@@ -86,15 +90,17 @@ mod tests {
 
     #[test]
     fn test_rea_detection() {
-        // REA is installed at /home/ubuntu/.local/bin/rea
-        assert!(ReaBridge::is_available());
-        let path = ReaBridge::detect_rea().unwrap();
-        assert!(path.exists());
+        if ReaBridge::is_available() {
+            let path = ReaBridge::detect_rea().unwrap();
+            assert!(path.exists());
+        }
     }
 
     #[test]
     fn test_rea_version_check() {
-        let version_out = ReaBridge::inspect_binary(Path::new("dummy"), "version").unwrap();
-        assert!(version_out.contains("6.7") || version_out.contains("rea"));
+        if ReaBridge::is_available() {
+            let version_out = ReaBridge::inspect_binary(Path::new("dummy"), "version").unwrap();
+            assert!(version_out.contains("6.7") || version_out.contains("rea"));
+        }
     }
 }

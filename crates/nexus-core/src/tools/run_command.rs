@@ -113,8 +113,14 @@ pub async fn execute_command(
     // Defense-in-depth blacklist check
     check_destructive_blacklist(command_line)?;
 
-    let mut cmd = Command::new("bash");
-    cmd.arg("-c")
+    let (shell, arg) = if cfg!(windows) {
+        ("cmd", "/C")
+    } else {
+        ("bash", "-c")
+    };
+
+    let mut cmd = Command::new(shell);
+    cmd.arg(arg)
         .arg(command_line)
         .current_dir(working_dir)
         .env_clear()

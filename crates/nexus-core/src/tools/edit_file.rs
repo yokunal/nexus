@@ -302,7 +302,7 @@ mod tests {
 
     #[test]
     fn test_tier1_exact_match() {
-        let temp_file = std::env::temp_dir().join("nexus_tier1_test.txt");
+        let temp_file = std::env::temp_dir().join(format!("nexus_tier1_test_{}.txt", uuid::Uuid::new_v4()));
         let content = "fn main() {\n    let answer = 41;\n    println!(\"{}\", answer);\n}\n";
         fs::write(&temp_file, content).unwrap();
 
@@ -312,11 +312,12 @@ mod tests {
 
         let updated = fs::read_to_string(&temp_file).unwrap();
         assert!(updated.contains("let answer = 42;"));
+        let _ = fs::remove_file(&temp_file);
     }
 
     #[test]
     fn test_tier1_ambiguity_guard() {
-        let temp_file = std::env::temp_dir().join("nexus_ambig_test.txt");
+        let temp_file = std::env::temp_dir().join(format!("nexus_ambig_test_{}.txt", uuid::Uuid::new_v4()));
         let content = "let x = 1;\nlet x = 1;\n";
         fs::write(&temp_file, content).unwrap();
 
@@ -329,11 +330,12 @@ mod tests {
                 tier: PatchTier::Tier1Exact,
             }
         );
+        let _ = fs::remove_file(&temp_file);
     }
 
     #[test]
     fn test_tier2_whitespace_normalized() {
-        let temp_file = std::env::temp_dir().join("nexus_tier2_test.txt");
+        let temp_file = std::env::temp_dir().join(format!("nexus_tier2_test_{}.txt", uuid::Uuid::new_v4()));
         // Indentation in file is 8 spaces
         let content = "fn test() {\n        let val = 100;\n        val + 1\n}\n";
         fs::write(&temp_file, content).unwrap();
@@ -347,11 +349,12 @@ mod tests {
 
         let updated = fs::read_to_string(&temp_file).unwrap();
         assert!(updated.contains("let val = 200;"));
+        let _ = fs::remove_file(&temp_file);
     }
 
     #[test]
     fn test_tier2_ambiguity_guard() {
-        let temp_file = std::env::temp_dir().join("nexus_tier2_ambig_test.txt");
+        let temp_file = std::env::temp_dir().join(format!("nexus_tier2_ambig_test_{}.txt", uuid::Uuid::new_v4()));
         let content = "  let x = 1;\n    let x = 1;\n";
         fs::write(&temp_file, content).unwrap();
 
@@ -368,11 +371,12 @@ mod tests {
                 tier: PatchTier::Tier2WhitespaceNormalized,
             }
         );
+        let _ = fs::remove_file(&temp_file);
     }
 
     #[test]
     fn test_tier3_anchor_context() {
-        let temp_file = std::env::temp_dir().join("nexus_tier3_test.txt");
+        let temp_file = std::env::temp_dir().join(format!("nexus_tier3_test_{}.txt", uuid::Uuid::new_v4()));
         let content = "fn compute() {\n    // start computation\n    let a = 1;\n    let b = 2;\n    // finish\n}\n";
         fs::write(&temp_file, content).unwrap();
 
@@ -385,5 +389,6 @@ mod tests {
 
         let updated = fs::read_to_string(&temp_file).unwrap();
         assert!(updated.contains("let a = 10;"));
+        let _ = fs::remove_file(&temp_file);
     }
 }
