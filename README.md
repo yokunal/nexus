@@ -5,7 +5,7 @@
 
 [![Rust](https://img.shields.io/badge/rust-1.85%2B-orange.svg)](https://www.rust-lang.org)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-63%2F63%20passed%20(100%25)-brightgreen.svg)]()
+[![Tests](https://img.shields.io/badge/tests-67%2F67%20passed%20(100%25)-brightgreen.svg)]()
 [![RAM Footprint](https://img.shields.io/badge/RAM-6.4%20MB-blueviolet.svg)]()
 [![Token Savings](https://img.shields.io/badge/token%20savings-69.1%25%20vs%20Claude%20Code-success.svg)]()
 
@@ -22,6 +22,7 @@ Existing AI coding harnesses (like Claude Code or Python-based CLI agents) are h
 * **🛡️ Hardened Process Quarantine**: Native in-binary AST command blacklist (`rm -rf /`, forkbombs), strict `../../` path traversal blocking, and automatic credential scrubbing.
 * **🧠 Sub-Millisecond Cross-Session Memory**: SQLite WAL-backed BM25 recall engine retrieving historical architecture decisions and bug patterns in **211 µs**.
 * **🤖 Multi-Provider Native Intelligence**: Seamless support for Anthropic Claude (3.7 Sonnet) and Native Google Gemini (2.5 Flash, 2.5 Flash Lite) with automated key detection.
+* **🌐 Native Polyglot Doctor & Indentation Rebaser**: First-class coding & automated repair across **Python, JavaScript/TypeScript, C/C++, Go, and Rust**. Auto-detects project stacks, runs language-native test/compiler diagnostics, and normalizes indentation deltas to prevent syntax errors.
 * **💾 WAL-First Persistence**: Invariant-enforced Append-Only Write-Ahead Log (WAL) architecture with automatic crash recovery, atomic log compaction, and SQLite WAL checkpointing.
 
 ---
@@ -126,16 +127,17 @@ Options:
 
 ## Verification & Test Suite
 
-All 63 unit, integration, and security tests pass with 100% success:
+All 67 unit, integration, polyglot, and security tests pass with 100% success:
 
 ```bash
 cargo test --all-targets
 ```
 
 ```
-running 42 tests in nexus-core lib ... ok
+running 43 tests in nexus-core lib ... ok
 running 6 tests in dogfood_integration ... ok
 running 8 tests in subagent_orchestration_test ... ok
+running 3 tests in polyglot_coding_test ... ok
 running 1 test in token_efficiency_benchmark ... ok
 running 1 test in quarantine_sandbox_attack_test ... ok
 running 1 test in indirect_prompt_injection_test ... ok
@@ -144,7 +146,7 @@ running 1 test in swarm_three_way_merge_test ... ok
 running 1 test in hyper_constrained_edge_test ... ok
 running 1 test in nexus_lsp ... ok
 
-test result: ok. 63 passed; 0 failed; 0 ignored; finished in 4.38s
+test result: ok. 67 passed; 0 failed; 0 ignored; finished in 4.52s
 ```
 
 ---
