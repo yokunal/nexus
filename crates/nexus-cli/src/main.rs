@@ -233,7 +233,7 @@ fn run_setup_wizard() -> io::Result<NexusConfig> {
             (
                 key_input.trim().to_string(),
                 Some("https://generativelanguage.googleapis.com/v1beta/openai".to_string()),
-                "gemini-3.8-flash".to_string(),
+                "gemini-2.5-flash".to_string(),
             )
         }
         "3" => {
@@ -475,7 +475,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let provider: Arc<dyn LlmProvider> = if is_gemini {
         let model_target = if config.model == "claude-3-7-sonnet-20250219" {
-            "gemini-3.8-flash".to_string()
+            "gemini-2.5-flash".to_string()
         } else {
             config.model.clone()
         };

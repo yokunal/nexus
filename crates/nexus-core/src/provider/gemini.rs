@@ -24,9 +24,9 @@ pub struct GeminiProvider {
 
 impl GeminiProvider {
     pub fn new(api_key: String, model: Option<String>) -> Self {
-        let mut default_model = model.unwrap_or_else(|| "gemini-3.8-flash".to_string());
-        if default_model == "gemini-2.0-flash" || default_model == "claude-3-7-sonnet-20250219" {
-            default_model = "gemini-3.8-flash".to_string();
+        let mut default_model = model.unwrap_or_else(|| "gemini-2.5-flash".to_string());
+        if default_model == "claude-3-7-sonnet-20250219" || default_model == "gemini-2.0-flash" {
+            default_model = "gemini-2.5-flash".to_string();
         }
         Self {
             client: reqwest::Client::new(),
