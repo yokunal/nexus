@@ -29,6 +29,8 @@ pub enum ToolError {
     Command(#[from] run_command::CommandError),
     #[error("Cargo check error: {0}")]
     CargoCheck(#[from] cargo_check::CargoCheckError),
+    #[error("Polyglot error: {0}")]
+    Polyglot(#[from] crate::polyglot::PolyglotError),
     #[error("LSP error: {0}")]
     Lsp(#[from] lsp::ToolLspError),
     #[error("Skill error: {0}")]
@@ -165,6 +167,14 @@ impl ToolManager {
                             "description": "Check mode to run: 'check' (default), 'clippy', or 'test'."
                         }
                     }
+                }
+            }),
+            serde_json::json!({
+                "name": "code_check",
+                "description": "Run structured polyglot diagnostic checks (Rust, Python, Node.js, C/C++, Go) on the active workspace, returning compiler/test diagnostics and repair guidance.",
+                "input_schema": {
+                    "type": "object",
+                    "properties": {}
                 }
             }),
             serde_json::json!({
@@ -335,6 +345,7 @@ impl ToolManager {
             "edit_file" => self.handle_edit(call).await,
             "run_command" => self.handle_command(call).await,
             "cargo_check" => self.handle_cargo_check(call).await,
+            "code_check" => self.handle_code_check(call).await,
             "lsp_hover" => self.handle_lsp_hover(call).await,
             "lsp_definition" => self.handle_lsp_definition(call).await,
             "lsp_symbols" => self.handle_lsp_symbols(call).await,
@@ -439,6 +450,11 @@ impl ToolManager {
         let report =
             cargo_check::execute_cargo_check(self.sandbox.workspace_root(), mode_str).await?;
         Ok(report)
+    }
+
+    async fn handle_code_check(&self, _call: &ToolCall) -> Result<String, ToolError> {
+        let res = crate::polyglot::PolyglotDoctor::run_check(self.sandbox.workspace_root()).await?;
+        Ok(crate::polyglot::PolyglotDoctor::format_report(&res))
     }
 
     async fn handle_lsp_hover(&self, call: &ToolCall) -> Result<String, ToolError> {

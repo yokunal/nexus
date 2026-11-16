@@ -7,11 +7,11 @@ use nexus_core::git::GitSnapshotManager;
 use nexus_core::gstack::{GStackEngine, GStackReviewMode};
 use nexus_core::memory::MemoryStore;
 use nexus_core::plugins::PluginManager;
+use nexus_core::polyglot::{PolyglotDetector, PolyglotDoctor};
 use nexus_core::provider::anthropic::AnthropicProvider;
 use nexus_core::provider::gemini::GeminiProvider;
 use nexus_core::provider::LlmProvider;
 use nexus_core::rea::ReaBridge;
-use nexus_core::rust_specialist::{CheckMode, RustCheckRunner};
 use nexus_core::sandbox::Sandbox;
 use nexus_core::session::{Message, SessionStore};
 use nexus_core::skills::{SkillManager, SkillWatcher};
@@ -1042,43 +1042,45 @@ Your workspace is at: {}.
 
         let prompt_to_send: String = match cmd_word {
             "/doctor" | "/check" => {
-                println!("{}╭─ 🩺 Nexus Doctor: Running Diagnostics ─────────────────{}", theme.border, theme.reset);
-                println!("{}│{} Checking workspace compilation health...", theme.border, theme.reset);
-                let check_res = RustCheckRunner::run_check(
-                    &workspace_dir,
-                    CheckMode::Check,
-                ).await;
+                let lang = PolyglotDetector::detect(&workspace_dir);
+                println!("{}╭─ 🩺 Nexus Polyglot Doctor: Running Diagnostics [{}] ───{}", theme.border, lang, theme.reset);
+                println!("{}│{} Checking workspace compilation & test health...", theme.border, theme.reset);
+                let check_res = PolyglotDoctor::run_check(&workspace_dir).await;
                 match check_res {
                     Ok(res) => {
                         if res.success {
-                            println!("{}│{} \x1b[1;32m✓ Clean build!\x1b[0m 0 compiler errors, {} warnings.{}", theme.border, theme.reset, res.warning_count, theme.reset);
+                            println!("{}│{} \x1b[1;32m✓ Clean project!\x1b[0m 0 compiler/test errors for {}.{}", theme.border, theme.reset, res.language, theme.reset);
                             println!("{}╰──────────────────────────────────────────────────────────{}", theme.border, theme.reset);
                             continue;
                         } else {
                             println!(
-                                "{}│{} \x1b[1;31m✗ {} compiler errors found:\x1b[0m{}",
-                                theme.border, theme.reset, res.error_count, theme.reset
+                                "{}│{} \x1b[1;31m✗ {} diagnostic issue(s) detected in {}:\x1b[0m{}",
+                                theme.border, theme.reset, res.diagnostics.len(), res.language, theme.reset
                             );
                             let mut concise_error_summary = String::new();
-                            for (i, diag) in res.diagnostics.iter().filter(|d| d.is_error()).take(3).enumerate() {
-                                let loc = diag.spans.first().map(|s| format!("{}:{}:{}", s.file_name, s.line_start, s.column_start)).unwrap_or_else(|| "unknown".to_string());
-                                let code = diag.code.as_ref().map(|c| format!("[{}] ", c.code)).unwrap_or_default();
+                            for (i, diag) in res.diagnostics.iter().take(3).enumerate() {
+                                let loc = match (diag.line, diag.column) {
+                                    (Some(l), Some(c)) => format!("{}:{}:{}", diag.file, l, c),
+                                    (Some(l), None) => format!("{}:{}", diag.file, l),
+                                    _ => diag.file.clone(),
+                                };
+                                let code = diag.code.as_ref().map(|c| format!("[{}] ", c)).unwrap_or_default();
                                 println!("{}│{}   {}. \x1b[1m{}\x1b[0m {}{}", theme.border, theme.reset, i + 1, loc, code, diag.message);
                                 concise_error_summary.push_str(&format!("{}. {}: {}{}\n", i + 1, loc, code, diag.message));
-                                if let Some(tutor) = &diag.tutor_advice {
-                                    println!("{}│{}      \x1b[0;36m💡 Tutor: {}\x1b[0m", theme.border, theme.reset, tutor);
+                                if let Some(sugg) = &diag.suggestion {
+                                    println!("{}│{}      \x1b[0;36m💡 Advice: {}\x1b[0m", theme.border, theme.reset, sugg);
                                 }
                             }
                             println!("{}╰──────────────────────────────────────────────────────────{}", theme.border, theme.reset);
                             println!("{}Initiating targeted precision repair with Nexus...{}", theme.brand_primary, theme.reset);
                             format!(
-                                "The compiler reported {} error(s):\n{}\nPlease inspect the affected files, apply the minimal necessary fix using edit_file, and verify the repair by running cargo_check.",
-                                res.error_count, concise_error_summary
+                                "The diagnostic check reported {} error(s) in {}:\n{}\nPlease inspect the affected files, apply the minimal necessary fix using edit_file, and verify the repair.",
+                                res.diagnostics.len(), res.language, concise_error_summary
                             )
                         }
                     }
                     Err(e) => {
-                        println!("{}│{} \x1b[1;33m! Note: Cargo check not available in this directory: {}{}", theme.border, theme.reset, e, theme.reset);
+                        println!("{}│{} \x1b[1;33m! Note: Diagnostic runner error in this directory: {}{}", theme.border, theme.reset, e, theme.reset);
                         println!("{}╰──────────────────────────────────────────────────────────{}", theme.border, theme.reset);
                         continue;
                     }
