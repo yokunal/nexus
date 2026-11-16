@@ -122,10 +122,17 @@ impl AgentRunner {
         let mut final_output = String::new();
         let mut subagent_status = SubagentStatus::Success;
 
+        // Route to subagent's designated model if configured (e.g. lightweight haiku for scouts)
+        let effective_provider: Arc<dyn LlmProvider> = if let Some(ref m) = agent.model {
+            provider.with_model(m).unwrap_or_else(|| provider.clone())
+        } else {
+            provider.clone()
+        };
+
         for _ in 0..agent.max_turns {
             turns_taken += 1;
             let (tx, mut rx) = mpsc::channel(64);
-            let provider_clone = provider.clone();
+            let provider_clone = effective_provider.clone();
             let sys_prompt = agent.system_prompt.clone();
             let history_clone = messages.clone();
             let tools_clone = allowed_tool_defs.clone();

@@ -28,4 +28,9 @@ pub trait LlmProvider: Send + Sync {
         tools: &[serde_json::Value],
         event_tx: Sender<NexusEvent>,
     ) -> Result<Message, ProviderError>;
+
+    /// Clones this provider with a different model target (e.g. for lighter subagents).
+    fn with_model(&self, _model: &str) -> Option<std::sync::Arc<dyn LlmProvider>> {
+        None
+    }
 }

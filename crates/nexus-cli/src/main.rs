@@ -580,6 +580,7 @@ Your workspace is at: {}.
                 "  /qa                     - Run automated QA loop (check, test, fix, re-verify)"
             );
             println!("  /ship                   - Run pre-landing ship verification (clean tree, clippy, test gate)");
+            println!("  /merge [branch]         - Merge a preserved subagent branch into current working branch");
             println!("  /agents                 - List registered subagent roster (scout, planner, reviewer, worker)");
             println!("  /skills                 - List all loaded permanent and staged skills");
             println!("  /promote <name>         - Promote a staged skill to permanent storage");
@@ -836,6 +837,52 @@ Your workspace is at: {}.
                 Err(err) => {
                     eprintln!("\x1b[1;31m[Error discarding skill]\x1b[0m {}", err);
                 }
+            }
+            continue;
+        }
+
+        if trimmed == "/merge" || trimmed.starts_with("/merge ") {
+            let arg = trimmed.strip_prefix("/merge").unwrap_or("").trim();
+            let branch_to_merge = if !arg.is_empty() {
+                arg.to_string()
+            } else {
+                // Discover the most recent subagent branch: git branch --list nexus-agent-* --sort=-committerdate
+                let out = std::process::Command::new("git")
+                    .args(["branch", "--list", "nexus-agent-*", "--sort=-committerdate"])
+                    .current_dir(&workspace_dir)
+                    .output();
+
+                match out {
+                    Ok(o) => {
+                        let stdout = String::from_utf8_lossy(&o.stdout);
+                        stdout.lines().next().map(|l| l.trim().trim_start_matches('*').trim().to_string()).unwrap_or_default()
+                    }
+                    Err(_) => String::new(),
+                }
+            };
+
+            if branch_to_merge.is_empty() {
+                println!("{}No subagent branches found to merge. Usage: /merge <branch-name>{}", theme.warning, theme.reset);
+                continue;
+            }
+
+            println!("{}Merging subagent branch '{}' into current branch...{}", theme.brand_primary, branch_to_merge, theme.reset);
+            let merge_out = std::process::Command::new("git")
+                .args(["merge", "--no-ff", &branch_to_merge, "-m", &format!("nexus: merge subagent branch '{}'", branch_to_merge)])
+                .current_dir(&workspace_dir)
+                .output();
+
+            match merge_out {
+                Ok(o) => {
+                    if o.status.success() {
+                        println!("{}✓ Successfully merged '{}' into current branch!{}", theme.brand_primary, branch_to_merge, theme.reset);
+                    } else {
+                        let stderr = String::from_utf8_lossy(&o.stderr);
+                        let stdout = String::from_utf8_lossy(&o.stdout);
+                        eprintln!("{}Merge conflict / notice:{}\n{}{}", theme.error, theme.reset, stdout, stderr);
+                    }
+                }
+                Err(err) => eprintln!("{}Failed to execute git merge: {}{}", theme.error, err, theme.reset),
             }
             continue;
         }
@@ -1188,27 +1235,54 @@ Your workspace is at: {}.
             TuiRenderer::render_ai_prefix(&theme);
             io::stdout().flush()?;
 
-            while let Some(event) = rx.recv().await {
-                match event {
-                    NexusEvent::TokenChunk(chunk) => {
-                        print!("{}", chunk);
-                        io::stdout().flush()?;
-                        current_turn_text.push_str(&chunk);
+            let mut interrupted_by_user = false;
+            loop {
+                tokio::select! {
+                    maybe_event = rx.recv() => {
+                        match maybe_event {
+                            Some(event) => {
+                                match event {
+                                    NexusEvent::TokenChunk(chunk) => {
+                                        print!("{}", chunk);
+                                        io::stdout().flush()?;
+                                        current_turn_text.push_str(&chunk);
+                                    }
+                                    NexusEvent::ToolCallStarted(ref call) => {
+                                        TuiRenderer::render_tool_call_start(&call.name, &call.arguments, &theme);
+                                    }
+                                    NexusEvent::TokenUsageRecorded(usage) => {
+                                        session_tokens.input_tokens += usage.input_tokens;
+                                        session_tokens.output_tokens += usage.output_tokens;
+                                        session_tokens.cache_read_tokens += usage.cache_read_tokens;
+                                        session_tokens.cache_creation_tokens += usage.cache_creation_tokens;
+                                        last_turn_usage = Some(usage);
+                                    }
+                                    _ => {}
+                                }
+                            }
+                            None => break,
+                        }
                     }
-                    NexusEvent::ToolCallStarted(ref call) => {
-                        TuiRenderer::render_tool_call_start(&call.name, &call.arguments, &theme);
+                    _ = tokio::signal::ctrl_c() => {
+                        println!("\n{}⟡ Interrupted by user (Ctrl+C).{}", theme.warning, theme.reset);
+                        interrupted_by_user = true;
+                        handle.abort();
+                        break;
                     }
-                    NexusEvent::TokenUsageRecorded(usage) => {
-                        session_tokens.input_tokens += usage.input_tokens;
-                        session_tokens.output_tokens += usage.output_tokens;
-                        session_tokens.cache_read_tokens += usage.cache_read_tokens;
-                        session_tokens.cache_creation_tokens += usage.cache_creation_tokens;
-                        last_turn_usage = Some(usage);
-                    }
-                    _ => {}
                 }
             }
             println!();
+
+            if interrupted_by_user {
+                if !current_turn_text.trim().is_empty() {
+                    pending_interrupted_output = Some(current_turn_text);
+                    println!(
+                        "{}Turn paused with partial output saved. Type /continue to pick up where we left off.{}",
+                        theme.warning, theme.reset
+                    );
+                }
+                break;
+            }
 
             let assistant_msg = match handle.await? {
                 Ok(msg) => msg,

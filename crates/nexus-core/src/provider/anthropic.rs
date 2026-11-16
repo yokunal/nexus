@@ -106,10 +106,23 @@ impl AnthropicProvider {
         self.base_url = base_url;
         self
     }
+
+    pub fn for_model(&self, model: &str) -> Self {
+        Self {
+            client: self.client.clone(),
+            api_key: self.api_key.clone(),
+            model: model.to_string(),
+            base_url: self.base_url.clone(),
+        }
+    }
 }
 
 #[async_trait]
 impl LlmProvider for AnthropicProvider {
+    fn with_model(&self, model: &str) -> Option<std::sync::Arc<dyn LlmProvider>> {
+        Some(std::sync::Arc::new(self.for_model(model)))
+    }
+
     async fn stream_turn(
         &self,
         system_prompt: &str,
