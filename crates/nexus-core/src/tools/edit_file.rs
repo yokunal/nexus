@@ -115,6 +115,11 @@ fn calculate_line_span(content: &str, target: &str) -> (usize, usize) {
     }
 }
 
+fn get_leading_whitespace(s: &str) -> &str {
+    let non_ws = s.find(|c: char| !c.is_whitespace()).unwrap_or(s.len());
+    &s[..non_ws]
+}
+
 /// Tier 2: Normalizes leading and trailing whitespace on each line,
 /// scanning a sliding window over file lines.
 fn try_whitespace_normalized(
@@ -161,14 +166,53 @@ fn try_whitespace_normalized(
         let end_line_idx = start_line_idx + window_size;
 
         // Reconstruct file: lines before + replacement + lines after
-        let mut updated_lines: Vec<&str> = Vec::new();
-        updated_lines.extend_from_slice(&file_lines[..start_line_idx]);
+        let mut updated_lines: Vec<String> = Vec::new();
+        for &line in &file_lines[..start_line_idx] {
+            updated_lines.push(line.to_string());
+        }
 
         let rep_lines: Vec<&str> = replacement.lines().collect();
-        updated_lines.extend_from_slice(&rep_lines);
+        let target_base_indent = target_lines.first().map(|l| get_leading_whitespace(l)).unwrap_or("");
+        let file_base_indent = get_leading_whitespace(file_lines[start_line_idx]);
+        let rep_base_indent = rep_lines.first().map(|l| get_leading_whitespace(l)).unwrap_or("");
+
+        let adjusted_rep_lines: Vec<String> = if !rep_lines.is_empty()
+            && rep_base_indent == target_base_indent
+            && target_base_indent != file_base_indent
+        {
+            if file_base_indent.len() > target_base_indent.len() && file_base_indent.starts_with(target_base_indent) {
+                let add_indent = &file_base_indent[target_base_indent.len()..];
+                rep_lines.iter().map(|&l| {
+                    if l.trim().is_empty() {
+                        String::new()
+                    } else {
+                        format!("{}{}", add_indent, l)
+                    }
+                }).collect()
+            } else if target_base_indent.len() > file_base_indent.len() && target_base_indent.starts_with(file_base_indent) {
+                let strip_len = target_base_indent.len() - file_base_indent.len();
+                rep_lines.iter().map(|&l| {
+                    if l.len() >= strip_len && l[..strip_len].trim().is_empty() {
+                        l[strip_len..].to_string()
+                    } else {
+                        l.to_string()
+                    }
+                }).collect()
+            } else {
+                rep_lines.iter().map(|&l| l.to_string()).collect()
+            }
+        } else {
+            rep_lines.iter().map(|&l| l.to_string()).collect()
+        };
+
+        for l in adjusted_rep_lines {
+            updated_lines.push(l);
+        }
 
         if end_line_idx < file_lines.len() {
-            updated_lines.extend_from_slice(&file_lines[end_line_idx..]);
+            for &line in &file_lines[end_line_idx..] {
+                updated_lines.push(line.to_string());
+            }
         }
 
         let mut updated_content = updated_lines.join("\n");
@@ -349,6 +393,27 @@ mod tests {
 
         let updated = fs::read_to_string(&temp_file).unwrap();
         assert!(updated.contains("let val = 200;"));
+        let _ = fs::remove_file(&temp_file);
+    }
+
+    #[test]
+    fn test_tier2_python_indentation_rebasing() {
+        let temp_file = std::env::temp_dir().join(format!("nexus_python_indent_test_{}.py", uuid::Uuid::new_v4()));
+        // File has 12 spaces in nested class method loop
+        let content = "class DataPipeline:\n    def process(self, records):\n        for r in records:\n            if r.is_valid:\n                cleaned.append(r.data)\n";
+        fs::write(&temp_file, content).unwrap();
+
+        // Model provides target with 4 spaces base
+        let target = "    if r.is_valid:\n        cleaned.append(r.data)";
+        // Model provides replacement with 4 spaces base
+        let replacement = "    if r.is_valid and not r.is_expired:\n        cleaned.append(r.data)";
+
+        let report = safe_replace(&temp_file, target, replacement).unwrap();
+        assert_eq!(report.tier, PatchTier::Tier2WhitespaceNormalized);
+
+        let updated = fs::read_to_string(&temp_file).unwrap();
+        // File must now have 12 spaces on the if line and 16 on the append line!
+        assert!(updated.contains("            if r.is_valid and not r.is_expired:\n                cleaned.append(r.data)"));
         let _ = fs::remove_file(&temp_file);
     }
 
