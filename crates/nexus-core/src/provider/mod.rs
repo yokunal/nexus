@@ -1,4 +1,5 @@
 pub mod anthropic;
+pub mod gemini;
 
 use crate::events::NexusEvent;
 use crate::session::Message;

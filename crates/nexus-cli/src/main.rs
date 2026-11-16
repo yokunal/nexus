@@ -8,6 +8,7 @@ use nexus_core::gstack::{GStackEngine, GStackReviewMode};
 use nexus_core::memory::MemoryStore;
 use nexus_core::plugins::PluginManager;
 use nexus_core::provider::anthropic::AnthropicProvider;
+use nexus_core::provider::gemini::GeminiProvider;
 use nexus_core::provider::LlmProvider;
 use nexus_core::rea::ReaBridge;
 use nexus_core::rust_specialist::{CheckMode, RustCheckRunner};
@@ -214,16 +215,28 @@ fn run_setup_wizard() -> io::Result<NexusConfig> {
     // 3. Provider Selection
     println!("\n\x1b[1;33m[3/4] Select LLM Provider:\x1b[0m");
     println!("  1) Auto-import from Claude Code (~/.claude/settings.json) [Recommended]");
-    println!("  2) Anthropic Claude (Direct API Key: sk-ant-...)");
-    println!("  3) Custom Endpoint / Proxy / AI Credits (Base URL + Auth Token)");
-    println!("  4) Local LLM / Ollama (http://localhost:11434/v1)");
-    print!("Choose [1-4] (default 1): ");
+    println!("  2) Google Gemini Free Tier (Direct API Key: AIzaSy...) [Zero Cost]");
+    println!("  3) Anthropic Claude (Direct API Key: sk-ant-...)");
+    println!("  4) Custom Endpoint / Proxy / AI Credits (Base URL + Auth Token)");
+    println!("  5) Local LLM / Ollama (http://localhost:11434/v1)");
+    print!("Choose [1-5] (default 1): ");
     io::stdout().flush()?;
     choice.clear();
     reader.read_line(&mut choice)?;
 
     let (api_key, base_url, mut default_model) = match choice.trim() {
         "2" => {
+            print!("\nEnter Google Gemini API Key (AIzaSy...): ");
+            io::stdout().flush()?;
+            let mut key_input = String::new();
+            reader.read_line(&mut key_input)?;
+            (
+                key_input.trim().to_string(),
+                Some("https://generativelanguage.googleapis.com/v1beta/openai".to_string()),
+                "gemini-3.8-flash".to_string(),
+            )
+        }
+        "3" => {
             print!("\nEnter Anthropic API Key (sk-ant-...): ");
             io::stdout().flush()?;
             let mut key_input = String::new();
@@ -234,7 +247,7 @@ fn run_setup_wizard() -> io::Result<NexusConfig> {
                 "claude-3-7-sonnet-20250219".to_string(),
             )
         }
-        "3" => {
+        "4" => {
             print!(
                 "\nEnter Base URL (e.g. https://api.aicredits.in or https://openrouter.ai/api/v1): "
             );
@@ -268,7 +281,7 @@ fn run_setup_wizard() -> io::Result<NexusConfig> {
 
             (key_input.trim().to_string(), b_url, model)
         }
-        "4" => (
+        "5" => (
             "ollama".to_string(),
             Some("http://localhost:11434/v1".to_string()),
             "qwen2.5-coder:latest".to_string(),
@@ -446,18 +459,38 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         &theme,
     );
 
-    let final_key = if config.api_key.is_empty() {
+    let gemini_env_key = std::env::var("GEMINI_API_KEY").ok().filter(|k| !k.trim().is_empty());
+    let final_key = if let Some(gk) = gemini_env_key {
+        gk.trim().to_string()
+    } else if config.api_key.is_empty() {
         "DUMMY_KEY_FOR_LOCAL_TEST".to_string()
     } else {
         config.api_key.clone()
     };
 
-    let mut provider_builder = AnthropicProvider::new(final_key, Some(config.model.clone()));
-    if let Some(ref b) = config.base_url {
-        provider_builder = provider_builder.with_base_url(b.clone());
-    }
+    let is_gemini = final_key.starts_with("AIzaSy")
+        || final_key.starts_with("AQ.")
+        || config.model.contains("gemini")
+        || config.base_url.as_deref().unwrap_or("").contains("googleapis.com");
 
-    let provider: Arc<dyn LlmProvider> = Arc::new(provider_builder);
+    let provider: Arc<dyn LlmProvider> = if is_gemini {
+        let model_target = if config.model == "claude-3-7-sonnet-20250219" {
+            "gemini-3.8-flash".to_string()
+        } else {
+            config.model.clone()
+        };
+        let mut gemini_builder = GeminiProvider::new(final_key, Some(model_target));
+        if let Some(ref b) = config.base_url {
+            gemini_builder = gemini_builder.with_base_url(b.clone());
+        }
+        Arc::new(gemini_builder)
+    } else {
+        let mut provider_builder = AnthropicProvider::new(final_key, Some(config.model.clone()));
+        if let Some(ref b) = config.base_url {
+            provider_builder = provider_builder.with_base_url(b.clone());
+        }
+        Arc::new(provider_builder)
+    };
     let tool_manager = Arc::new(tool_manager_builder.with_provider(provider.clone()));
     let tool_defs = ToolManager::tool_definitions();
 

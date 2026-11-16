@@ -22,6 +22,7 @@ pub use git::{GitSnapshotManager, TurnSnapshot};
 pub use gstack::{ArchitectureInvariants, GStackEngine, GStackReviewMode};
 pub use memory::{BenchmarkReport, DistilledMemory, MemoryError, MemorySearchResult, MemoryStore};
 pub use plugins::{Plugin, PluginCommand, PluginError, PluginManager};
+pub use provider::{anthropic::AnthropicProvider, gemini::GeminiProvider, LlmProvider, ProviderError};
 pub use rea::{ReaBridge, ReaError};
 pub use rust_specialist::{BorrowTutor, CheckMode, CheckResult, RustCheckRunner, RustDiagnostic};
 pub use sandbox::Sandbox;
