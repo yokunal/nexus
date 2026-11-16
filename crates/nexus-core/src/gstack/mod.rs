@@ -24,6 +24,7 @@ pub struct ArchitectureInvariants {
     pub explicit_error_domains: bool,
     pub shallow_wrapper_guard: bool,
     pub test_coverage_contract: bool,
+    pub persistence_wal_first: bool,
     pub custom_rules: Vec<String>,
 }
 
@@ -34,6 +35,7 @@ impl Default for ArchitectureInvariants {
             explicit_error_domains: true,
             shallow_wrapper_guard: true,
             test_coverage_contract: true,
+            persistence_wal_first: true,
             custom_rules: Vec::new(),
         }
     }
@@ -83,6 +85,11 @@ impl GStackEngine {
         if invariants.test_coverage_contract {
             prompt.push_str(
                 "- **Test Coverage Contract**: Every new public interface must be accompanied by unit or integration tests verifying happy and failure paths.\n",
+            );
+        }
+        if invariants.persistence_wal_first {
+            prompt.push_str(
+                "- **Persistence & Storage Architecture Invariant**: Never implement naive full-file rewrite or truncation persistence (`truncate(true)`). Always build production-grade Append-Only Write-Ahead Logs (WAL) or transactional SQLite with WAL journaling. Every storage engine must guarantee:\n  1. Atomic sequential append-only writes with fsync flushing.\n  2. Crash-recovery sequential replay on startup that reconstructs in-memory state.\n  3. Background or explicit log compaction to prune obsolete tombstones, expired entries, and overwritten keys.\n",
             );
         }
 
@@ -157,6 +164,8 @@ mod tests {
         assert!(prompt.contains("Interface-First Contract"));
         assert!(prompt.contains("Explicit Error Domains"));
         assert!(prompt.contains("Test Coverage Contract"));
+        assert!(prompt.contains("Persistence & Storage Architecture Invariant"));
+        assert!(prompt.contains("Append-Only Write-Ahead Logs"));
     }
 
     #[test]

@@ -48,6 +48,8 @@ impl SessionStore {
 
     fn connect(&self) -> Result<Connection, SessionError> {
         let conn = Connection::open(&self.db_path)?;
+        // Busy timeout to avoid database locks under concurrent agent operations
+        conn.busy_timeout(std::time::Duration::from_millis(5000))?;
         // Enable WAL mode for concurrency and tune cache to 256KB to keep memory ultra-lean
         conn.pragma_update(None, "journal_mode", "WAL")?;
         conn.pragma_update(None, "synchronous", "NORMAL")?;
@@ -135,6 +137,70 @@ impl SessionStore {
             params![Utc::now().to_rfc3339(), session_id],
         )?;
 
+        Ok(())
+    }
+
+    /// Atomically persists a batch of messages inside a single transaction.
+    /// This drastically reduces fsync overhead compared to writing messages one-by-one.
+    pub fn save_messages_batch(
+        &self,
+        session_id: &str,
+        msgs: &[Message],
+    ) -> Result<(), SessionError> {
+        if msgs.is_empty() {
+            return Ok(());
+        }
+
+        let mut conn = self.connect()?;
+        let tx = conn.transaction()?;
+
+        for msg in msgs {
+            let calls_json = msg
+                .tool_calls
+                .as_ref()
+                .map(serde_json::to_string)
+                .transpose()?;
+            let results_json = msg
+                .tool_results
+                .as_ref()
+                .map(serde_json::to_string)
+                .transpose()?;
+
+            tx.execute(
+                "INSERT INTO messages (session_id, role, content, tool_calls, tool_results, timestamp)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                params![
+                    session_id,
+                    msg.role,
+                    msg.content,
+                    calls_json,
+                    results_json,
+                    msg.timestamp.to_rfc3339()
+                ],
+            )?;
+        }
+
+        tx.execute(
+            "UPDATE sessions SET updated_at = ?1 WHERE id = ?2",
+            params![Utc::now().to_rfc3339(), session_id],
+        )?;
+
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// Performs an explicit WAL checkpoint to truncate the write-ahead log back into the main database file.
+    /// Prevents uncontrolled WAL growth during long autonomous agent runs.
+    pub fn checkpoint(&self) -> Result<(), SessionError> {
+        let conn = self.connect()?;
+        conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);")?;
+        Ok(())
+    }
+
+    /// Vacuums the session database to reclaim freed pages after message compaction.
+    pub fn vacuum(&self) -> Result<(), SessionError> {
+        let conn = self.connect()?;
+        conn.execute_batch("VACUUM;")?;
         Ok(())
     }
 
@@ -356,5 +422,44 @@ mod tests {
         let validated = SessionStore::validate_turns(msgs);
         assert_eq!(validated.len(), 1);
         assert_eq!(validated[0].role, "user");
+    }
+
+    #[test]
+    fn test_wal_checkpoint_and_batch_persistence() {
+        let temp_db = env::temp_dir().join(format!("nexus_test_wal_{}.db", Uuid::new_v4()));
+        let store = SessionStore::new(&temp_db).unwrap();
+        let session = store.create_session("WAL Batch Test").unwrap();
+
+        let batch = vec![
+            Message {
+                role: "user".to_string(),
+                content: "Batch msg 1".to_string(),
+                tool_calls: None,
+                tool_results: None,
+                timestamp: Utc::now(),
+            },
+            Message {
+                role: "assistant".to_string(),
+                content: "Batch msg 2".to_string(),
+                tool_calls: None,
+                tool_results: None,
+                timestamp: Utc::now(),
+            },
+        ];
+
+        store.save_messages_batch(&session.id, &batch).unwrap();
+        let loaded = store.load_session(&session.id).unwrap();
+        assert_eq!(loaded.messages.len(), 2);
+        assert_eq!(loaded.messages[0].content, "Batch msg 1");
+        assert_eq!(loaded.messages[1].content, "Batch msg 2");
+
+        // Verify WAL checkpoint executes cleanly
+        store.checkpoint().unwrap();
+        // Verify vacuum executes cleanly
+        store.vacuum().unwrap();
+
+        let _ = std::fs::remove_file(&temp_db);
+        let _ = std::fs::remove_file(temp_db.with_extension("db-wal"));
+        let _ = std::fs::remove_file(temp_db.with_extension("db-shm"));
     }
 }
