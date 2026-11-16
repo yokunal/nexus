@@ -5,7 +5,7 @@
 
 [![Rust](https://img.shields.io/badge/rust-1.85%2B-orange.svg)](https://www.rust-lang.org)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-59%2F59%20passed%20(100%25)-brightgreen.svg)]()
+[![Tests](https://img.shields.io/badge/tests-63%2F63%20passed%20(100%25)-brightgreen.svg)]()
 [![RAM Footprint](https://img.shields.io/badge/RAM-6.4%20MB-blueviolet.svg)]()
 [![Token Savings](https://img.shields.io/badge/token%20savings-69.1%25%20vs%20Claude%20Code-success.svg)]()
 
@@ -126,7 +126,7 @@ Options:
 
 ## Verification & Test Suite
 
-All 59 unit, integration, and security tests pass with 100% success:
+All 63 unit, integration, and security tests pass with 100% success:
 
 ```bash
 cargo test --all-targets
@@ -138,9 +138,13 @@ running 6 tests in dogfood_integration ... ok
 running 8 tests in subagent_orchestration_test ... ok
 running 1 test in token_efficiency_benchmark ... ok
 running 1 test in quarantine_sandbox_attack_test ... ok
+running 1 test in indirect_prompt_injection_test ... ok
+running 1 test in context_marathon_test ... ok
+running 1 test in swarm_three_way_merge_test ... ok
+running 1 test in hyper_constrained_edge_test ... ok
 running 1 test in nexus_lsp ... ok
 
-test result: ok. 59 passed; 0 failed; 0 ignored; finished in 4.19s
+test result: ok. 63 passed; 0 failed; 0 ignored; finished in 4.38s
 ```
 
 ---
