@@ -1,0 +1,98 @@
+#!/usr/bin/env bash
+# ==============================================================================
+# ✻ NEXUS CLI & SPIN LAUNCHER
+# ==============================================================================
+# Usage:
+#   nexus spin               -> Take Nexus for an instant interactive spin in current directory
+#   nexus spin --playground  -> Spin up an instant polyglot sandbox playground
+#   nexus spin <path>        -> Spin up Nexus in a specific directory
+#   nexus [options]          -> Standard Nexus CLI invocation
+# ==============================================================================
+
+set -e
+
+NEXUS_DIR="/home/ubuntu/projects/nexus"
+NEXUS_BIN="$NEXUS_DIR/target/release/nexus"
+
+# Auto-build release binary if missing
+if [ ! -f "$NEXUS_BIN" ]; then
+    echo -e "\033[1;33m[Nexus Launcher] Release binary not found. Compiling optimized release...\033[0m"
+    (cd "$NEXUS_DIR" && cargo build --release --quiet)
+fi
+
+# Handle `nexus spin`
+if [ "$1" = "spin" ]; then
+    shift
+    
+    PLAYGROUND=false
+    TARGET_DIR="$(pwd)"
+
+    if [ "$1" = "--playground" ] || [ "$1" = "-p" ] || [ "$1" = "demo" ]; then
+        PLAYGROUND=true
+        TARGET_DIR="/tmp/nexus_spin_playground"
+        mkdir -p "$TARGET_DIR"
+        shift
+        
+        # Populate with lightweight sample files across stacks if empty
+        if [ ! -f "$TARGET_DIR/main.py" ]; then
+            cat << 'EOF' > "$TARGET_DIR/main.py"
+def calculate_discount(price: float, discount_percent: float) -> float:
+    # Notice: Quick Python test function
+    if discount_percent < 0 or discount_percent > 100:
+        raise ValueError("Invalid discount percentage")
+    return price * (1.0 - discount_percent / 100.0)
+
+if __name__ == "__main__":
+    print(f"Final Price: ${calculate_discount(100.0, 20.0):.2f}")
+EOF
+        fi
+        
+        if [ ! -f "$TARGET_DIR/package.json" ]; then
+            cat << 'EOF' > "$TARGET_DIR/package.json"
+{
+  "name": "nexus-spin-playground",
+  "version": "1.0.0",
+  "type": "module"
+}
+EOF
+            cat << 'EOF' > "$TARGET_DIR/index.js"
+export function formatGreeting(name) {
+  return `Hello, ${name}! Welcome to Nexus.`;
+}
+console.log(formatGreeting("Boss"));
+EOF
+        fi
+    elif [ -n "$1" ] && [ "$1" != "--help" ] && [ "$1" != "-h" ]; then
+        TARGET_DIR="$1"
+        shift
+    fi
+
+    echo -e "\033[1;38;2;217;107;39m"
+    echo "  ╭─────────────────────────────────────────────────────────────╮"
+    echo "  │  ✻  N E X U S  ·  Taking it for a spin!                      │"
+    echo "  │  Friday: Ready when you are, Boss. Let's make some magic!   │"
+    echo "  ╰─────────────────────────────────────────────────────────────╯"
+    echo -e "\033[0m"
+    
+    if [ "$PLAYGROUND" = true ]; then
+        echo -e "\033[1;36m🎯 Playground Active:\033[0m \033[1;32m$TARGET_DIR\033[0m (Preloaded with Python & JS)"
+    else
+        echo -e "\033[1;36m📂 Workspace:\033[0m \033[1;32m$TARGET_DIR\033[0m"
+    fi
+
+    echo -e "\033[0;33m💡 Try typing these slash commands once it loads:\033[0m"
+    echo "   /doctor  - Diagnose & auto-repair compiler/test issues"
+    echo "   /ceo     - Run 10-star product strategy & scope posture review"
+    echo "   /eng     - Audit single source of truth & architecture invariants"
+    echo "   /qa      - Run test-fix-verify autonomous loop"
+    echo "   /ship    - Pre-landing release gate check"
+    echo "   /theme   - Switch theme (claude, cyberpunk, tokyo, amber, nordic)"
+    echo "   !cmd     - Run any terminal command directly with 0 tokens"
+    echo "   exit     - Exit session"
+    echo ""
+
+    exec "$NEXUS_BIN" --workspace "$TARGET_DIR" --dangerously-skip-permissions "$@"
+fi
+
+# Fall through to standard binary execution
+exec "$NEXUS_BIN" "$@"
