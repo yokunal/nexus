@@ -77,6 +77,24 @@ fn trim_working_set() {
 }
 
 #[cfg(target_os = "linux")]
+fn init_linux_allocator() {
+    extern "C" {
+        fn mallopt(param: i32, value: i32) -> i32;
+    }
+    unsafe {
+        // M_ARENA_MAX (-8): Limit glibc malloc arenas to 2 to eliminate multi-thread heap fragmentation
+        mallopt(-8, 2);
+        // M_TRIM_THRESHOLD (-1): Eagerly return free memory to kernel whenever 64KB is freed
+        mallopt(-1, 65536);
+        // M_MMAP_THRESHOLD (-3): Allocate >= 128KB via mmap so they are unmapped immediately on drop
+        mallopt(-3, 131072);
+    }
+}
+
+#[cfg(not(target_os = "linux"))]
+fn init_linux_allocator() {}
+
+#[cfg(target_os = "linux")]
 fn trim_working_set() {
     extern "C" {
         fn malloc_trim(pad: usize) -> i32;
@@ -125,7 +143,27 @@ fn get_process_memory_kb() -> Option<usize> {
             }
         }
     }
-    #[cfg(not(windows))]
+    #[cfg(target_os = "linux")]
+    {
+        // On Linux, report RssAnon (actual private allocated heap & stack memory).
+        // This avoids conflating application memory with the kernel's read-only file/executable page cache (RssFile).
+        if let Ok(status) = std::fs::read_to_string("/proc/self/status") {
+            for line in status.lines() {
+                if let Some(rest) = line.strip_prefix("RssAnon:") {
+                    let kb_str = rest.trim().trim_end_matches("kB").trim();
+                    if let Ok(kb) = kb_str.parse::<usize>() {
+                        return Some(kb);
+                    }
+                }
+            }
+        }
+        if let Ok(statm) = std::fs::read_to_string("/proc/self/statm") {
+            let pages: usize = statm.split_whitespace().nth(1)?.parse().ok()?;
+            return Some(pages * 4);
+        }
+        None
+    }
+    #[cfg(not(any(windows, target_os = "linux")))]
     {
         if let Ok(statm) = std::fs::read_to_string("/proc/self/statm") {
             let pages: usize = statm.split_whitespace().nth(1)?.parse().ok()?;
@@ -356,6 +394,7 @@ fn run_setup_wizard() -> io::Result<NexusConfig> {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    init_linux_allocator();
     let cli = Cli::parse();
 
     let workspace_dir = cli
@@ -411,7 +450,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Auto-connect rust-analyzer if a Rust workspace exists
     if workspace_dir.join("Cargo.toml").exists() {
         if let Ok(client) = nexus_lsp::LspClient::start("rust-analyzer", &workspace_dir).await {
-            println!("\x1b[1;32m[LSP]\x1b[0m Connected to rust-analyzer");
+            println!("\x1b[1;32m[LSP]\x1b[0m Connected to native language server");
             tool_manager_builder =
                 tool_manager_builder.with_lsp_client(Arc::new(tokio::sync::Mutex::new(client)));
         }
@@ -713,13 +752,32 @@ Your workspace is at: {}.
                 "{}--- Nexus Process Diagnostics ---{}",
                 theme.brand_primary, theme.reset
             );
-            println!("  Process Memory: {}", mem_str);
-            println!("  Session ID:     {}", session.id);
-            println!("  Model:          {}", config.model);
-            println!("  Theme:          {} ({:?})", theme.name, config.color_mode);
-            println!("  Display Mode:   {:?}", config.display_mode);
-            println!("  SQLite Cache:   256 KB");
-            println!("  Note: Windows Terminal DirectX GPU renderer uses ~50 MB separately for the window frame.");
+            println!("  Heap Memory (Anon): {}", mem_str);
+            #[cfg(target_os = "linux")]
+            {
+                if let Ok(status) = std::fs::read_to_string("/proc/self/status") {
+                    let mut file_cache = "Unknown".to_string();
+                    let mut total_rss = "Unknown".to_string();
+                    for line in status.lines() {
+                        if let Some(rest) = line.strip_prefix("RssFile:") {
+                            if let Ok(kb) = rest.trim().trim_end_matches("kB").trim().parse::<usize>() {
+                                file_cache = format!("{:.2} MB ({} KB)", kb as f64 / 1024.0, kb);
+                            }
+                        } else if let Some(rest) = line.strip_prefix("VmRSS:") {
+                            if let Ok(kb) = rest.trim().trim_end_matches("kB").trim().parse::<usize>() {
+                                total_rss = format!("{:.2} MB ({} KB)", kb as f64 / 1024.0, kb);
+                            }
+                        }
+                    }
+                    println!("  OS File Cache:      {}", file_cache);
+                    println!("  Total Process RSS:  {}", total_rss);
+                }
+            }
+            println!("  Session ID:         {}", session.id);
+            println!("  Model:              {}", config.model);
+            println!("  Theme:              {} ({:?})", theme.name, config.color_mode);
+            println!("  Display Mode:       {:?}", config.display_mode);
+            println!("  SQLite Cache:       256 KB");
             println!(
                 "{}---------------------------------{}",
                 theme.brand_primary, theme.reset
@@ -1271,9 +1329,11 @@ Your workspace is at: {}.
             let tools_clone = tool_defs.clone();
 
             let handle = tokio::spawn(async move {
-                provider_clone
+                let res = provider_clone
                     .stream_turn(&sys_clone, &history_clone, &tools_clone, tx)
-                    .await
+                    .await;
+                trim_working_set();
+                res
             });
 
             let mut current_turn_text = String::new();
