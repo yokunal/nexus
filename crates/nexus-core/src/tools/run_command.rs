@@ -32,7 +32,7 @@ pub struct CommandOutput {
 pub fn check_destructive_blacklist(command_line: &str) -> Result<(), CommandError> {
     let lower = command_line.trim().to_lowercase();
 
-    // High-risk destructive command patterns
+    // High-risk destructive command patterns (all normalized to lowercase)
     let dangerous_patterns = [
         "rm -rf /",
         "rm -rf /*",
@@ -44,12 +44,13 @@ pub fn check_destructive_blacklist(command_line: &str) -> Result<(), CommandErro
         "> /dev/nvme",
         "dd if=/dev/zero of=/dev/",
         "dd if=/dev/urandom of=/dev/",
-        "chmod -R 777 /",
-        "chown -R",
+        "chmod -r 777 /",
+        "chmod 777 /",
+        "chown -r",
     ];
 
     for pattern in &dangerous_patterns {
-        if lower.contains(pattern) {
+        if lower.contains(&pattern.to_lowercase()) {
             return Err(CommandError::BlockedCommand(pattern.to_string()));
         }
     }
