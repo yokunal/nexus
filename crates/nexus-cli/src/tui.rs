@@ -328,20 +328,7 @@ impl TuiRenderer {
 
         let endpoint_str = config.base_url.as_deref().unwrap_or("https://api.anthropic.com");
 
-        let smug_taglines = [
-            "· Built in Rust because Electron is embarrassing",
-            "· 7MB RAM. Cry about it, Node.js",
-            "· Faster than your whole stack. You're welcome",
-            "· Native Rust. Too fast to care, too lean to bloat",
-            "· 7MB of pure native arrogance. Deal with it",
-            "· Running circles around 200MB bloatware agents",
-            "· Yes, it already finished. Try to keep up",
-        ];
-        let idx = (std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .subsec_nanos() as usize) % smug_taglines.len();
-        let tagline = smug_taglines[idx];
+        let tagline = "· 7MB of pure native arrogance";
 
         let prefix_len: usize = 25; // "╭─ ✻  N E X U S  v0.1.0  "
         let total_target: usize = 74;
