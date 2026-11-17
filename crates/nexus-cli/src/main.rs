@@ -671,6 +671,7 @@ Your workspace is at: {}.
             println!(
                 "  /qa                     - Run automated QA loop (check, test, fix, re-verify)"
             );
+            println!("  /loop [goal]            - Run autonomous execution loop (Plan-Act-Verify) until goal is 100% met");
             println!("  /ship                   - Run pre-landing ship verification (clean tree, clippy, test gate)");
             println!("  /merge [branch]         - Merge a preserved subagent branch into current working branch");
             println!("  /agents                 - List registered subagent roster (scout, planner, reviewer, worker)");
@@ -1195,6 +1196,14 @@ Your workspace is at: {}.
                 match cmd_arg {
                     Some(arg) if !arg.is_empty() => arg.to_string(),
                     _ => "Run test suites and compiler checks, identify any failures, patch them atomically via edit_file, and re-verify until 100% green.".to_string(),
+                }
+            }
+            "/loop" | "/autopilot" => {
+                println!("\x1b[1;35m[nexus]\x1b[0m Activating Autonomous Execution Loop");
+                active_system_prompt.push_str("\n\n[Autonomous Execution Loop Mode]:\nYou are operating in an autonomous goal-directed loop. For the given objective, formulate a concise Plan, execute Actions via tools, run verification (compiler/tests/diagnostics), and iterate autonomously until all verifications pass cleanly and the objective is 100% achieved.");
+                match cmd_arg {
+                    Some(arg) if !arg.is_empty() => arg.to_string(),
+                    _ => "Execute the task in an autonomous plan-act-verify loop, iterating until all tests and compiler checks pass cleanly.".to_string(),
                 }
             }
             "/ship" => {

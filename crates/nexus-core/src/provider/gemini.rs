@@ -174,25 +174,48 @@ impl LlmProvider for GeminiProvider {
             format!("{}/chat/completions", base)
         };
 
-        let response = self
-            .client
-            .post(&endpoint_url)
-            .headers(headers)
-            .json(&body)
-            .send()
-            .await?;
+        let mut attempts = 0;
+        let max_attempts = 4;
+        let mut backoff = std::time::Duration::from_millis(2000);
 
-        if !response.status().is_success() {
-            let status = response.status().as_u16();
-            let err_body = response
+        let response = loop {
+            attempts += 1;
+            let resp = self
+                .client
+                .post(&endpoint_url)
+                .headers(headers.clone())
+                .json(&body)
+                .send()
+                .await?;
+
+            let status = resp.status();
+            if status.is_success() {
+                break resp;
+            }
+
+            let status_code = status.as_u16();
+            let is_transient = status_code == 503 || status_code == 502 || status_code == 500;
+            if is_transient && attempts < max_attempts {
+                let _ = event_tx
+                    .send(NexusEvent::Error(format!(
+                        "Transient API error ({}), retrying in {:?} (attempt {}/{})...",
+                        status_code, backoff, attempts, max_attempts
+                    )))
+                    .await;
+                tokio::time::sleep(backoff).await;
+                backoff *= 2;
+                continue;
+            }
+
+            let err_body = resp
                 .text()
                 .await
                 .unwrap_or_else(|_| "Unknown API error".to_string());
             return Err(ProviderError::Api {
-                status,
+                status: status_code,
                 message: err_body,
             });
-        }
+        };
 
         let mut full_text = String::new();
         let mut tool_calls_map: BTreeMap<usize, (String, String, String, Option<Value>)> = BTreeMap::new();
