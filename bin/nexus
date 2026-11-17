@@ -11,8 +11,14 @@
 
 set -e
 
-NEXUS_DIR="/home/ubuntu/projects/nexus"
+SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
+NEXUS_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 NEXUS_BIN="$NEXUS_DIR/target/release/nexus"
+
+# Ensure cargo is in PATH if needed for auto-compilation
+if [ -f "$HOME/.cargo/env" ]; then
+    . "$HOME/.cargo/env"
+fi
 
 # Auto-build release binary if missing
 if [ ! -f "$NEXUS_BIN" ]; then
