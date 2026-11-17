@@ -359,11 +359,11 @@ impl LlmProvider for AnthropicProvider {
                     if !current_tool_name.is_empty() {
                         let parsed_args =
                             serde_json::from_str(&current_tool_json).unwrap_or(json!({}));
-                        let call = ToolCall {
-                            id: current_tool_id.clone(),
-                            name: current_tool_name.clone(),
-                            arguments: parsed_args,
-                        };
+                        let call = ToolCall::new(
+                            current_tool_id.clone(),
+                            current_tool_name.clone(),
+                            parsed_args,
+                        );
                         let _ = event_tx
                             .send(NexusEvent::ToolCallStarted(call.clone()))
                             .await;

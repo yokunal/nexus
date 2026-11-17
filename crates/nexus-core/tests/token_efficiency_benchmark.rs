@@ -375,11 +375,11 @@ fn format_nexus_payload(turns: &[TurnScenario]) -> serde_json::Value {
         history_messages.push(Message {
             role: "assistant".to_string(),
             content: String::new(),
-            tool_calls: Some(vec![ToolCall {
-                id: format!("call_{}", t.turn_num),
-                name: t.tool_name.to_string(),
-                arguments: json!({ "path": "src/lib.rs" }),
-            }]),
+            tool_calls: Some(vec![ToolCall::new(
+                format!("call_{}", t.turn_num),
+                t.tool_name.to_string(),
+                json!({ "path": "src/lib.rs" }),
+            )]),
             tool_results: None,
             timestamp: Utc::now(),
         });

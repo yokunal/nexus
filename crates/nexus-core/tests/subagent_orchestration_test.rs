@@ -305,11 +305,7 @@ async fn test_tool_manager_invoke_subagent_and_list() {
     let tool_mgr = ToolManager::new(sandbox).with_provider(provider);
 
     // 1. Test list_agents
-    let list_call = ToolCall {
-        id: "call_list_1".to_string(),
-        name: "list_agents".to_string(),
-        arguments: serde_json::json!({}),
-    };
+    let list_call = ToolCall::new("call_list_1", "list_agents", serde_json::json!({}));
     let list_result = tool_mgr.execute(&list_call).await;
     assert!(!list_result.is_error);
     assert!(list_result.output.contains("scout"));
@@ -317,32 +313,32 @@ async fn test_tool_manager_invoke_subagent_and_list() {
     assert!(list_result.output.contains("worker"));
 
     // 2. Test invoke_subagent single
-    let invoke_single_call = ToolCall {
-        id: "call_invoke_1".to_string(),
-        name: "invoke_subagent".to_string(),
-        arguments: serde_json::json!({
+    let invoke_single_call = ToolCall::new(
+        "call_invoke_1",
+        "invoke_subagent",
+        serde_json::json!({
             "agent": "scout",
             "task": "Perform read-only security scan",
             "topology": "single"
         }),
-    };
+    );
     let single_result = tool_mgr.execute(&invoke_single_call).await;
     assert!(!single_result.is_error);
     assert!(single_result.output.contains("<subagent_handback"));
     assert!(single_result.output.contains(r#"agent="scout""#));
 
     // 3. Test invoke_subagent parallel
-    let invoke_parallel_call = ToolCall {
-        id: "call_invoke_2".to_string(),
-        name: "invoke_subagent".to_string(),
-        arguments: serde_json::json!({
+    let invoke_parallel_call = ToolCall::new(
+        "call_invoke_2",
+        "invoke_subagent",
+        serde_json::json!({
             "topology": "parallel",
             "tasks": [
                 { "agent": "scout", "task": "Check license headers" },
                 { "agent": "reviewer", "task": "Check code comments" }
             ]
         }),
-    };
+    );
     let parallel_result = tool_mgr.execute(&invoke_parallel_call).await;
     assert!(!parallel_result.is_error);
     assert!(parallel_result.output.contains("Parallel Subagent Execution Report (2 tasks)"));

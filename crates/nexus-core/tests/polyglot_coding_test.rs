@@ -98,11 +98,11 @@ if __name__ == "__main__":
     let sandbox = Sandbox::new(&test_dir, false).unwrap();
     let manager = ToolManager::new(sandbox);
 
-    let run_call = ToolCall {
-        id: "call_py_test".to_string(),
-        name: "run_command".to_string(),
-        arguments: serde_json::json!({ "command": "python3 -m unittest test_cache.py" }),
-    };
+    let run_call = ToolCall::new(
+        "call_py_test",
+        "run_command",
+        serde_json::json!({ "command": "python3 -m unittest test_cache.py" }),
+    );
 
     let result = manager.execute(&run_call).await;
     assert!(!result.is_error);
@@ -193,11 +193,11 @@ test('pipeline processes async transformations sequentially', async () => {
     let sandbox = Sandbox::new(&test_dir, false).unwrap();
     let manager = ToolManager::new(sandbox);
 
-    let check_call = ToolCall {
-        id: "call_node_check".to_string(),
-        name: "code_check".to_string(),
-        arguments: serde_json::json!({}),
-    };
+    let check_call = ToolCall::new(
+        "call_node_check",
+        "code_check",
+        serde_json::json!({}),
+    );
 
     let result = manager.execute(&check_call).await;
     assert!(!result.is_error);
@@ -319,13 +319,13 @@ int main(void) {
     let sandbox = Sandbox::new(&test_dir, false).unwrap();
     let manager = ToolManager::new(sandbox);
 
-    let compile_call = ToolCall {
-        id: "call_gcc".to_string(),
-        name: "run_command".to_string(),
-        arguments: serde_json::json!({
+    let compile_call = ToolCall::new(
+        "call_gcc",
+        "run_command",
+        serde_json::json!({
             "command": "gcc -Wall -Wextra -Werror ring_buffer.c test_ring.c -o test_ring && ./test_ring"
         }),
-    };
+    );
 
     let compile_res = manager.execute(&compile_call).await;
     assert!(!compile_res.is_error, "C compilation and execution must succeed: {}", compile_res.output);

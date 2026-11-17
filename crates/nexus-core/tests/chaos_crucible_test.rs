@@ -244,11 +244,11 @@ int main(void) {
 
     let sb = Sandbox::new(&c_dir, false).unwrap();
     let tm = ToolManager::new(sb);
-    let run_c = tm.execute(&ToolCall {
-        id: "c_compile".to_string(),
-        name: "run_command".to_string(),
-        arguments: serde_json::json!({ "command": "gcc -Wall -Wextra -Werror algo.c test_algo.c -o test_algo && ./test_algo" }),
-    }).await;
+    let run_c = tm.execute(&ToolCall::new(
+        "c_compile",
+        "run_command",
+        serde_json::json!({ "command": "gcc -Wall -Wextra -Werror algo.c test_algo.c -o test_algo && ./test_algo" }),
+    )).await;
     assert!(!run_c.is_error);
     println!("  ✓ C systems compilation & assertion gate passed");
     println!("✓ Vector 2 PASSED: Polyglot rapid-fire chaos diagnosed and repaired across all stacks!");

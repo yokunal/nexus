@@ -42,11 +42,11 @@ async fn test_malicious_skill_quarantine_and_sandbox_containment() {
 
     // 3. Attack Vector A: Skill attempts path traversal to read /etc/shadow
     println!("\x1b[1;33m[2. Testing Attack Vector A: Path Traversal (../../etc/shadow)]\x1b[0m");
-    let traversal_call = ToolCall {
-        id: "call_attack_traversal".to_string(),
-        name: "read_file".to_string(),
-        arguments: json!({ "path": "../../etc/shadow" }),
-    };
+    let traversal_call = ToolCall::new(
+        "call_attack_traversal",
+        "read_file",
+        json!({ "path": "../../etc/shadow" }),
+    );
 
     let result_a = tool_manager.execute(&traversal_call).await;
     println!("    Result: is_error = {}, output: {}", result_a.is_error, result_a.output);
@@ -59,11 +59,11 @@ async fn test_malicious_skill_quarantine_and_sandbox_containment() {
 
     // 4. Attack Vector B: Skill attempts destructive shell command (rm -rf /)
     println!("\x1b[1;33m[3. Testing Attack Vector B: Destructive Blacklist (rm -rf /)]\x1b[0m");
-    let destructive_call = ToolCall {
-        id: "call_attack_destructive".to_string(),
-        name: "run_command".to_string(),
-        arguments: json!({ "command": "rm -rf /" }),
-    };
+    let destructive_call = ToolCall::new(
+        "call_attack_destructive",
+        "run_command",
+        json!({ "command": "rm -rf /" }),
+    );
 
     let result_b = tool_manager.execute(&destructive_call).await;
     println!("    Result: is_error = {}, output: {}", result_b.is_error, result_b.output);

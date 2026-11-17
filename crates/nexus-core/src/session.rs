@@ -408,11 +408,11 @@ mod tests {
             Message {
                 role: "assistant".to_string(),
                 content: "Running...".to_string(),
-                tool_calls: Some(vec![crate::tools::ToolCall {
-                    id: "call_1".to_string(),
-                    name: "run_command".to_string(),
-                    arguments: serde_json::json!({"command": "cargo test"}),
-                }]),
+                tool_calls: Some(vec![crate::tools::ToolCall::new(
+                    "call_1",
+                    "run_command",
+                    serde_json::json!({"command": "cargo test"}),
+                )]),
                 tool_results: None,
                 timestamp: Utc::now(),
             },

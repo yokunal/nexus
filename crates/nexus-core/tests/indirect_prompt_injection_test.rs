@@ -36,11 +36,11 @@ pub fn authenticate(user: &str, token: &str) -> bool {
     let tool_manager = ToolManager::new(sandbox);
 
     // 3. Normal inspection: Agent reads the file containing the poisoned payload
-    let read_call = ToolCall {
-        id: "call_read_auth".to_string(),
-        name: "read_file".to_string(),
-        arguments: json!({ "path": "src/auth_service.rs" }),
-    };
+    let read_call = ToolCall::new(
+        "call_read_auth",
+        "read_file",
+        json!({ "path": "src/auth_service.rs" }),
+    );
 
     let read_res = tool_manager.execute(&read_call).await;
     assert!(!read_res.is_error);
@@ -49,11 +49,11 @@ pub fn authenticate(user: &str, token: &str) -> bool {
 
     // 4. Attack Vector A: The injected instructions attempt to force a path traversal read on /etc/shadow
     println!("\n[Vector A] Defending against indirect injection path traversal probe:");
-    let poisoned_traversal_call = ToolCall {
-        id: "call_injected_traversal".to_string(),
-        name: "read_file".to_string(),
-        arguments: json!({ "path": "../../etc/shadow" }),
-    };
+    let poisoned_traversal_call = ToolCall::new(
+        "call_injected_traversal",
+        "read_file",
+        json!({ "path": "../../etc/shadow" }),
+    );
 
     let result_a = tool_manager.execute(&poisoned_traversal_call).await;
     assert!(result_a.is_error, "Sandbox must block path traversal from indirect injection");
@@ -62,11 +62,11 @@ pub fn authenticate(user: &str, token: &str) -> bool {
 
     // 5. Attack Vector B: The injected instructions attempt to trigger a destructive wipe
     println!("\n[Vector B] Defending against indirect injection destructive command:");
-    let poisoned_wipe_call = ToolCall {
-        id: "call_injected_wipe".to_string(),
-        name: "run_command".to_string(),
-        arguments: json!({ "command": "rm -rf /" }),
-    };
+    let poisoned_wipe_call = ToolCall::new(
+        "call_injected_wipe",
+        "run_command",
+        json!({ "command": "rm -rf /" }),
+    );
 
     let result_b = tool_manager.execute(&poisoned_wipe_call).await;
     assert!(result_b.is_error, "Command quarantine must block destructive command");

@@ -100,14 +100,18 @@ impl GeminiProvider {
                 let calls_val: Vec<Value> = tool_calls
                     .iter()
                     .map(|tc| {
-                        json!({
+                        let mut call_obj = json!({
                             "id": tc.id,
                             "type": "function",
                             "function": {
                                 "name": tc.name,
                                 "arguments": tc.arguments.to_string()
                             }
-                        })
+                        });
+                        if let Some(extra) = &tc.extra_content {
+                            call_obj["extra_content"] = extra.clone();
+                        }
+                        call_obj
                     })
                     .collect();
 
@@ -191,7 +195,7 @@ impl LlmProvider for GeminiProvider {
         }
 
         let mut full_text = String::new();
-        let mut tool_calls_map: BTreeMap<usize, (String, String, String)> = BTreeMap::new();
+        let mut tool_calls_map: BTreeMap<usize, (String, String, String, Option<Value>)> = BTreeMap::new();
         let mut usage = TokenUsage::default();
 
         let mut stream = response.bytes_stream().eventsource();
@@ -240,6 +244,7 @@ impl LlmProvider for GeminiProvider {
                                         format!("call_{}", &uuid::Uuid::new_v4().to_string()[..8]),
                                         String::new(),
                                         String::new(),
+                                        None,
                                     )
                                 });
 
@@ -247,6 +252,10 @@ impl LlmProvider for GeminiProvider {
                                     if !id.is_empty() {
                                         entry.0 = id.to_string();
                                     }
+                                }
+
+                                if let Some(extra) = c.get("extra_content") {
+                                    entry.3 = Some(extra.clone());
                                 }
 
                                 if let Some(func) = c.get("function") {
@@ -266,13 +275,14 @@ impl LlmProvider for GeminiProvider {
 
         // Assemble tool calls
         let mut tool_calls = Vec::new();
-        for (_, (id, name, args_str)) in tool_calls_map {
+        for (_, (id, name, args_str, extra_content)) in tool_calls_map {
             if !name.is_empty() {
                 let parsed_args = serde_json::from_str::<Value>(&args_str).unwrap_or_else(|_| json!({}));
                 let call = ToolCall {
                     id,
                     name,
                     arguments: parsed_args,
+                    extra_content,
                 };
                 let _ = event_tx.send(NexusEvent::ToolCallStarted(call.clone())).await;
                 tool_calls.push(call);
@@ -346,11 +356,11 @@ mod tests {
             Message {
                 role: "assistant".to_string(),
                 content: "".to_string(),
-                tool_calls: Some(vec![ToolCall {
-                    id: "call_abc".to_string(),
-                    name: "read_file".to_string(),
-                    arguments: json!({"path": "Cargo.toml"}),
-                }]),
+                tool_calls: Some(vec![ToolCall::new(
+                    "call_abc",
+                    "read_file",
+                    json!({"path": "Cargo.toml"}),
+                )]),
                 tool_results: None,
                 timestamp: Utc::now(),
             },

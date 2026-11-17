@@ -50,6 +50,19 @@ pub struct ToolCall {
     pub id: String,
     pub name: String,
     pub arguments: serde_json::Value,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub extra_content: Option<serde_json::Value>,
+}
+
+impl ToolCall {
+    pub fn new(id: impl Into<String>, name: impl Into<String>, arguments: serde_json::Value) -> Self {
+        Self {
+            id: id.into(),
+            name: name.into(),
+            arguments,
+            extra_content: None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -762,63 +775,63 @@ mod tests {
         let manager = ToolManager::new(sandbox);
 
         // 1. Write file
-        let write_call = ToolCall {
-            id: "call_write".to_string(),
-            name: "write_file".to_string(),
-            arguments: serde_json::json!({
+        let write_call = ToolCall::new(
+            "call_write",
+            "write_file",
+            serde_json::json!({
                 "path": "test.txt",
                 "content": "Line 1\nLine 2\nLine 3"
             }),
-        };
+        );
         let res = manager.execute(&write_call).await;
         assert!(!res.is_error);
 
         // 2. Read file
-        let read_call = ToolCall {
-            id: "call_read".to_string(),
-            name: "read_file".to_string(),
-            arguments: serde_json::json!({
+        let read_call = ToolCall::new(
+            "call_read",
+            "read_file",
+            serde_json::json!({
                 "path": "test.txt",
                 "start_line": 2,
                 "end_line": 2
             }),
-        };
+        );
         let res = manager.execute(&read_call).await;
         assert!(!res.is_error);
         assert!(res.output.contains("Line 2"));
 
         // 3. Edit file (exact match)
-        let edit_call = ToolCall {
-            id: "call_edit".to_string(),
-            name: "edit_file".to_string(),
-            arguments: serde_json::json!({
+        let edit_call = ToolCall::new(
+            "call_edit",
+            "edit_file",
+            serde_json::json!({
                 "path": "test.txt",
                 "target": "Line 2",
                 "replacement": "Line Two Updated"
             }),
-        };
+        );
         let res = manager.execute(&edit_call).await;
         assert!(!res.is_error);
 
         // 4. Verify updated content
         let read_updated = manager
-            .execute(&ToolCall {
-                id: "call_read_2".to_string(),
-                name: "read_file".to_string(),
-                arguments: serde_json::json!({ "path": "test.txt" }),
-            })
+            .execute(&ToolCall::new(
+                "call_read_2",
+                "read_file",
+                serde_json::json!({ "path": "test.txt" }),
+            ))
             .await;
         assert!(read_updated.output.contains("Line Two Updated"));
 
         // 5. Test path traversal block
-        let traversal_call = ToolCall {
-            id: "call_traversal".to_string(),
-            name: "write_file".to_string(),
-            arguments: serde_json::json!({
+        let traversal_call = ToolCall::new(
+            "call_traversal",
+            "write_file",
+            serde_json::json!({
                 "path": "../../outside.txt",
                 "content": "hacked"
             }),
-        };
+        );
         let res = manager.execute(&traversal_call).await;
         assert!(res.is_error);
         assert!(res.output.contains("Path traversal detected"));
@@ -843,11 +856,11 @@ mod tests {
         let sandbox = Sandbox::new(&temp_dir, false).unwrap();
         let manager = ToolManager::new(sandbox);
 
-        let check_call = ToolCall {
-            id: "call_check".to_string(),
-            name: "cargo_check".to_string(),
-            arguments: serde_json::json!({ "mode": "check" }),
-        };
+        let check_call = ToolCall::new(
+            "call_check",
+            "cargo_check",
+            serde_json::json!({ "mode": "check" }),
+        );
 
         let res = manager.execute(&check_call).await;
         assert!(!res.is_error);
@@ -863,15 +876,15 @@ mod tests {
         let sandbox = Sandbox::new(&temp_dir, false).unwrap();
         let manager = ToolManager::new(sandbox); // No LSP client attached
 
-        let hover_call = ToolCall {
-            id: "call_hover".to_string(),
-            name: "lsp_hover".to_string(),
-            arguments: serde_json::json!({
+        let hover_call = ToolCall::new(
+            "call_hover",
+            "lsp_hover",
+            serde_json::json!({
                 "path": "src/main.rs",
                 "line": 1,
                 "column": 1
             }),
-        };
+        );
 
         let res = manager.execute(&hover_call).await;
         assert!(res.is_error);
