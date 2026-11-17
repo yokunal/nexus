@@ -8,3 +8,12 @@
 **/*.rs.bk
 *.tgz
 npm-package/binaries/
+logs/
+run/
+debug/
+.loop/driver.log
+.loop/driver.lock
+.loop/session-*.log
+__pycache__/
+.venv/
+node_modules/

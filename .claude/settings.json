@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "deny": [
+      "rm -rf /",
+      "rm -rf ~",
+      "git push --force*",
+      "git reset --hard*",
+      "mkfs*",
+      "dd if=*"
+    ]
+  }
+}
