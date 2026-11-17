@@ -266,7 +266,7 @@ fn test_step6_context_engineering_compaction_and_continuation() {
     assert_eq!(budget.threshold_tokens(), 96_000);
     assert!(!budget.is_above_threshold(95_999));
     assert!(budget.is_above_threshold(96_000));
-    assert_eq!(budget.format_short_pill(50_000), "🗜️ 50.0k/128k");
+    assert_eq!(budget.format_short_pill(50_000), "50.0k/128k");
     println!("✓ Context budget threshold and status pill formatting verified");
 
     // 2. MacroCompaction & Session persistence rewrite

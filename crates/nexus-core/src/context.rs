@@ -57,11 +57,11 @@ impl ContextBudget {
         format!("{:.1}k / {:.0}k ({:.1}%)", cur_k, win_k, pct)
     }
 
-    /// Formats a compact chip for prompt bar: e.g. "🗜️ 14.2k/128k"
+    /// Formats a compact chip for prompt bar: e.g. "14.2k/128k"
     pub fn format_short_pill(&self, current_tokens: u32) -> String {
         let cur_k = current_tokens as f64 / 1000.0;
         let win_k = self.window_capacity as f64 / 1000.0;
-        format!("🗜️ {:.1}k/{:.0}k", cur_k, win_k)
+        format!("{:.1}k/{:.0}k", cur_k, win_k)
     }
 }
 

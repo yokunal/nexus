@@ -72,7 +72,6 @@ fn test_100k_token_context_marathon_compaction_and_durability() {
 
     let pill = budget.format_short_pill(estimated_tokens as u32);
     println!("✓ Context budget status pill: {}", pill);
-    assert!(pill.starts_with("🗜️"));
     assert!(pill.contains("/128k"));
 
     // 3. MacroCompactor: Compress deep history into structured <context_summary>
