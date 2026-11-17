@@ -57,7 +57,7 @@ impl<W: CircularWalStore + Send + Sync> OrchestratorEngine for PavOrchestrator<W
                         // Dynamic model verification query
                         let prompt = format!("Verify task '{}' under iteration {}", goal, iteration);
                         let comp = self.router.complete(&prompt, &[]).await?;
-                        if comp.text.contains("PASS") || comp.text.contains("OK") || !comp.text.is_empty() {
+                        if (comp.text.contains("PASS") || comp.text.contains("OK")) && !comp.text.contains("FAIL") {
                             success = true;
                         }
                     }
