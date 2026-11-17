@@ -328,15 +328,38 @@ impl TuiRenderer {
 
         let endpoint_str = config.base_url.as_deref().unwrap_or("https://api.anthropic.com");
 
+        let smug_taglines = [
+            "· Built in Rust because Electron is embarrassing",
+            "· 7MB RAM. Cry about it, Node.js",
+            "· Faster than your whole stack. You're welcome",
+            "· Native Rust. Too fast to care, too lean to bloat",
+            "· 7MB of pure native arrogance. Deal with it",
+            "· Running circles around 200MB bloatware agents",
+            "· Yes, it already finished. Try to keep up",
+        ];
+        let idx = (std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .subsec_nanos() as usize) % smug_taglines.len();
+        let tagline = smug_taglines[idx];
+
+        let prefix_len: usize = 25; // "╭─ ✻  N E X U S  v0.1.0  "
+        let total_target: usize = 74;
+        let dashes_count = total_target.saturating_sub(prefix_len + tagline.chars().count()).max(3);
+        let dashes = "─".repeat(dashes_count);
+
         println!();
         println!(
-            "{}╭─ {}✻  N E X U S{}  {}v0.1.0{}  {}· Native Rust Coding Harness ───────────────────────────{}",
+            "{}╭─ {}✻  N E X U S{}  {}v0.1.0{}  {}{}{} {}{}",
             theme.border,
             theme.brand_primary,
             theme.bold,
             theme.text_dim,
             theme.reset,
-            theme.text_muted,
+            theme.brand_secondary,
+            tagline,
+            theme.border,
+            dashes,
             theme.reset
         );
         println!(

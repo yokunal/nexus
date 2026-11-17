@@ -76,7 +76,7 @@ EOF
     echo -e "\033[1;38;2;217;107;39m"
     echo "  ╭─────────────────────────────────────────────────────────────╮"
     echo "  │  ✻  N E X U S  ·  Taking it for a spin!                      │"
-    echo "  │  Friday: Ready when you are, Boss. Let's make some magic!   │"
+    echo "  │  Friday: Let's run laps around those 200MB bloatware agents!│"
     echo "  ╰─────────────────────────────────────────────────────────────╯"
     echo -e "\033[0m"
     
