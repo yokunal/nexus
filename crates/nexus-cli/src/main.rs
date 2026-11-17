@@ -76,7 +76,17 @@ fn trim_working_set() {
     }
 }
 
-#[cfg(not(windows))]
+#[cfg(target_os = "linux")]
+fn trim_working_set() {
+    extern "C" {
+        fn malloc_trim(pad: usize) -> i32;
+    }
+    unsafe {
+        malloc_trim(0);
+    }
+}
+
+#[cfg(not(any(windows, target_os = "linux")))]
 fn trim_working_set() {}
 
 fn get_process_memory_kb() -> Option<usize> {
@@ -1383,6 +1393,7 @@ Your workspace is at: {}.
             }
         }
 
+        trim_working_set();
         let cur_tokens = MacroCompactor::estimate_history_tokens(&session.messages);
         let pill = context_budget.format_status_pill(cur_tokens);
         TuiRenderer::render_turn_footer(get_process_memory_kb(), last_turn_usage.as_ref(), Some(&pill), &theme);
