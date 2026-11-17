@@ -47,7 +47,7 @@ impl ThemePalette {
     pub fn for_mode(mode: ColorMode) -> Self {
         match mode {
             ColorMode::Claude | ColorMode::Dark => Self {
-                name: "Claude Terracotta",
+                name: "Terracotta",
                 // Anthropic warm coral & terracotta palette (24-bit TrueColor)
                 brand_primary: "\x1b[38;2;217;107;39m",   // #D96B27 (Terracotta)
                 brand_secondary: "\x1b[38;2;235;127;92m", // #EB7F5C (Warm Coral)
@@ -363,7 +363,7 @@ impl TuiRenderer {
         );
 
         let rea_str = if rea_available {
-            format!("{}REA: Enabled{}", theme.info, theme.reset)
+            format!("{}REA: On{}", theme.info, theme.reset)
         } else {
             format!("{}REA: Off{}", theme.text_dim, theme.reset)
         };
