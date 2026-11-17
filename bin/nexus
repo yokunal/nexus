@@ -11,10 +11,10 @@
 
 set -e
 
-# Keep Linux glibc allocator lean: limit per-thread arenas and eagerly trim free memory back to kernel
-export MALLOC_ARENA_MAX=2
-export MALLOC_TRIM_THRESHOLD_=65536
-export MALLOC_MMAP_THRESHOLD_=131072
+# Keep Linux glibc allocator lean: limit to 1 arena and eagerly trim free memory back to kernel
+export MALLOC_ARENA_MAX=1
+export MALLOC_TRIM_THRESHOLD_=16384
+export MALLOC_MMAP_THRESHOLD_=65536
 
 SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 NEXUS_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"

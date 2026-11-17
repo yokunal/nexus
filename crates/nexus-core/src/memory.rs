@@ -150,6 +150,13 @@ impl MemoryStore {
         Ok(())
     }
 
+    /// Shrinks SQLite internal pager memory and flushes unneeded pages back to system.
+    pub fn shrink(&self) {
+        if let Ok(conn) = self.conn.lock() {
+            let _ = conn.execute_batch("PRAGMA shrink_memory;");
+        }
+    }
+
     /// Searches across all distilled notes and conversation turns using BM25 relevance scoring.
     pub fn search(
         &self,

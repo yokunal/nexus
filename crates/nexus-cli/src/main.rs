@@ -82,12 +82,12 @@ fn init_linux_allocator() {
         fn mallopt(param: i32, value: i32) -> i32;
     }
     unsafe {
-        // M_ARENA_MAX (-8): Limit glibc malloc arenas to 2 to eliminate multi-thread heap fragmentation
-        mallopt(-8, 2);
-        // M_TRIM_THRESHOLD (-1): Eagerly return free memory to kernel whenever 64KB is freed
-        mallopt(-1, 65536);
-        // M_MMAP_THRESHOLD (-3): Allocate >= 128KB via mmap so they are unmapped immediately on drop
-        mallopt(-3, 131072);
+        // M_ARENA_MAX (-8): 1 arena forces 100% of allocations into main arena, eliminating secondary thread-arena creep
+        mallopt(-8, 1);
+        // M_TRIM_THRESHOLD (-1): Eagerly return free memory to kernel whenever 16KB is freed
+        mallopt(-1, 16384);
+        // M_MMAP_THRESHOLD (-3): Allocate >= 64KB via mmap so they are unmapped immediately on drop
+        mallopt(-3, 65536);
     }
 }
 
@@ -392,9 +392,17 @@ fn run_setup_wizard() -> io::Result<NexusConfig> {
     Ok(config)
 }
 
-#[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
+fn main() -> Result<(), Box<dyn std::error::Error>> {
     init_linux_allocator();
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(1)
+        .max_blocking_threads(2)
+        .enable_all()
+        .build()?;
+    runtime.block_on(async_main())
+}
+
+async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
 
     let workspace_dir = cli
@@ -591,6 +599,8 @@ Your workspace is at: {}.
             None
         };
 
+        session.messages.shrink_to_fit();
+        memory_store.shrink();
         trim_working_set();
         TuiRenderer::render_prompt(
             &workspace_dir,
@@ -1453,6 +1463,8 @@ Your workspace is at: {}.
             }
         }
 
+        session.messages.shrink_to_fit();
+        memory_store.shrink();
         trim_working_set();
         let cur_tokens = MacroCompactor::estimate_history_tokens(&session.messages);
         let pill = context_budget.format_status_pill(cur_tokens);

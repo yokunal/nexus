@@ -29,7 +29,12 @@ impl GeminiProvider {
             default_model = "gemini-2.5-flash".to_string();
         }
         Self {
-            client: reqwest::Client::new(),
+            client: reqwest::Client::builder()
+                .pool_idle_timeout(Some(std::time::Duration::from_secs(5)))
+                .pool_max_idle_per_host(1)
+                .tcp_nodelay(true)
+                .build()
+                .unwrap_or_else(|_| reqwest::Client::new()),
             api_key,
             model: default_model,
             base_url: "https://generativelanguage.googleapis.com/v1beta/openai".to_string(),
