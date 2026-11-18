@@ -32,9 +32,9 @@ pub type Theme = ThemePalette;
     about = "Nexus: High-Throughput Polyglot & Rust AI Coding Harness"
 )]
 struct Cli {
-    /// Resume a conversation by UUID
-    #[arg(long)]
-    conversation: Option<String>,
+    /// Resume a conversation by 7-char hash (e.g. 8f2a1b) or UUID
+    #[arg(short = 'r', long, alias = "conversation")]
+    resume: Option<String>,
 
     /// Continue the most recent conversation
     #[arg(short = 'c', long)]
@@ -439,23 +439,46 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
         } else {
             println!("Found {} relevant historical records:\n", results.len());
             for (i, r) in results.iter().enumerate() {
+                let session_tag = if r.session_id.is_empty() {
+                    "GLOBAL".to_string()
+                } else {
+                    format!("#{}", r.session_id)
+                };
                 println!(
-                    "{}. \x1b[1;33m[{}]\x1b[0m \x1b[1m{}\x1b[0m (score: {:.2})\n   {}\n",
+                    "{}. \x1b[1;33m[{}]\x1b[0m \x1b[1m{}\x1b[0m · Session: \x1b[1;36m{}\x1b[0m (score: {:.2})\n   {}\n   \x1b[0;32mResume with: nexus -r {}\x1b[0m\n",
                     i + 1,
                     r.source.to_uppercase(),
                     r.topic_or_role,
+                    session_tag,
                     r.score,
-                    r.snippet
+                    r.snippet,
+                    r.session_id
                 );
             }
         }
         return Ok(());
     }
 
-    // Determine session ID
-    let mut session = if let Some(id) = cli.conversation {
-        println!("Resuming session: {}", id);
-        session_store.load_session(&id)?
+    // Determine session ID (via -r <hash>, -c latest, or new session)
+    let mut session = if let Some(ref id) = cli.resume {
+        match session_store.load_session(id) {
+            Ok(s) => {
+                println!("\x1b[1;32m[Session]\x1b[0m Resumed session: #{} ('{}')", s.id, s.title);
+                s
+            }
+            Err(e) => {
+                eprintln!("\x1b[1;31m[Session]\x1b[0m Could not resume session '{}': {}. Starting new session.", id, e);
+                session_store.create_session("Nexus CLI Session")?
+            }
+        }
+    } else if cli.continue_session {
+        match session_store.load_latest_session() {
+            Ok(s) => {
+                println!("\x1b[1;32m[Session]\x1b[0m Continued latest session: #{} ('{}')", s.id, s.title);
+                s
+            }
+            Err(_) => session_store.create_session("Nexus CLI Session")?,
+        }
     } else {
         session_store.create_session("Nexus CLI Session")?
     };
@@ -624,6 +647,7 @@ Your workspace is at: {}.
         TuiRenderer::render_prompt(
             &workspace_dir,
             git_branch.as_deref(),
+            Some(&session.id),
             get_process_memory_kb(),
             short_pill.as_deref(),
             &theme,
@@ -697,6 +721,8 @@ Your workspace is at: {}.
             println!("  /skills                 - List all loaded permanent and staged skills");
             println!("  /promote <name>         - Promote a staged skill to permanent storage");
             println!("  /discard <name>         - Discard a staged skill from sandbox quarantine");
+            println!("  /sessions               - List recent sessions with short 7-char hashes and turn counts");
+            println!("  /resume <hash>          - Switch active conversation to another session by hash");
             println!("  /recall <query>         - Search past sessions and distilled memory cards");
             println!("  /remember <topic>: <msg>- Save a distilled insight into long-term memory");
             println!("  /bench-memory           - Benchmark memory search throughput and microsecond latency");
@@ -1018,6 +1044,59 @@ Your workspace is at: {}.
             continue;
         }
 
+        if trimmed == "/sessions" {
+            match session_store.list_sessions(15) {
+                Ok(list) => {
+                    println!("{}╭─ {}⟡ Neural-FS Session History{} ────────────────────────────────{}", theme.border_accent, theme.brand_primary, theme.border_accent, theme.reset);
+                    if list.is_empty() {
+                        println!("{}│{}  No recorded sessions found.", theme.border_accent, theme.reset);
+                    } else {
+                        for (id, title, ts, turns) in list {
+                            let is_current = if id == session.id {
+                                format!(" {}[ACTIVE]{}", theme.success, theme.reset)
+                            } else {
+                                "".to_string()
+                            };
+                            println!(
+                                "{}│{}  • {}#{:<7}{} · {}{}{} ({} turns) · {}{}{}",
+                                theme.border_accent, theme.reset,
+                                theme.brand_secondary, id, theme.reset,
+                                theme.text_primary, title, theme.reset,
+                                turns,
+                                theme.text_dim, ts.format("%b %d %H:%M UTC"), is_current
+                            );
+                        }
+                        println!("{}│{}", theme.border_accent, theme.reset);
+                        println!("{}│{}  Resume any session with: {}/resume <hash>{} or {}nexus -r <hash>{}", 
+                            theme.border_accent, theme.reset,
+                            theme.brand_primary, theme.reset,
+                            theme.brand_primary, theme.reset
+                        );
+                    }
+                    println!("{}╰─────────────────────────────────────────────────────────────────{}", theme.border_accent, theme.reset);
+                }
+                Err(err) => eprintln!("Error loading sessions: {}", err),
+            }
+            continue;
+        }
+
+        if let Some(arg) = trimmed.strip_prefix("/resume ") {
+            let target_hash = arg.trim();
+            match session_store.load_session(target_hash) {
+                Ok(loaded) => {
+                    session = loaded;
+                    println!(
+                        "{}✓ Switched active session to #{} ('{}' with {} turns){}",
+                        theme.success, session.id, session.title, session.messages.len(), theme.reset
+                    );
+                }
+                Err(err) => {
+                    eprintln!("{}Failed to load session '{}': {}{}", theme.error, target_hash, err, theme.reset);
+                }
+            }
+            continue;
+        }
+
         if let Some(rest) = trimmed.strip_prefix("/recall ") {
             let query = rest.trim();
             match memory_store.search(query, 5) {
@@ -1027,13 +1106,20 @@ Your workspace is at: {}.
                     } else {
                         println!("\x1b[1;36mFound {} memory results:\x1b[0m", results.len());
                         for (i, r) in results.iter().enumerate() {
+                            let session_tag = if r.session_id.is_empty() {
+                                "GLOBAL".to_string()
+                            } else {
+                                format!("#{}", r.session_id)
+                            };
                             println!(
-                                "{}. \x1b[1;33m[{}]\x1b[0m \x1b[1m{}\x1b[0m (score: {:.2})\n   {}\n",
+                                "{}. \x1b[1;33m[{}]\x1b[0m \x1b[1m{}\x1b[0m · Session: \x1b[1;36m{}\x1b[0m (score: {:.2})\n   {}\n   \x1b[0;32mResume with: nexus -r {}\x1b[0m\n",
                                 i + 1,
                                 r.source.to_uppercase(),
                                 r.topic_or_role,
+                                session_tag,
                                 r.score,
-                                r.snippet
+                                r.snippet,
+                                r.session_id
                             );
                         }
                     }

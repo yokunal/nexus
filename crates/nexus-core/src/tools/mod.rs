@@ -586,15 +586,24 @@ impl ToolManager {
             return Ok(format!("No matching memories found for query: '{}'", query));
         }
 
-        let mut out = format!("Found {} relevant memory results:\n", results.len());
+        let mut out = format!("Found {} relevant memory record(s):\n", results.len());
         for (i, r) in results.iter().enumerate() {
+            let hash_tag = if r.session_id.is_empty() {
+                "GLOBAL".to_string()
+            } else {
+                format!("#{}", r.session_id)
+            };
             out.push_str(&format!(
-                "{}. [{}] {} (score: {:.2})\n   {}\n",
+                "{}. [{}] Session: {} · Topic/Role: {} (Score: {:.2})\n   Date: {}\n   Details: {}\n   Resume command: `nexus -r {}` or `/resume {}`\n\n",
                 i + 1,
                 r.source.to_uppercase(),
+                hash_tag,
                 r.topic_or_role,
                 r.score,
-                r.snippet
+                r.timestamp.format("%Y-%m-%d %H:%M UTC"),
+                r.snippet,
+                r.session_id,
+                r.session_id
             ));
         }
         Ok(out)

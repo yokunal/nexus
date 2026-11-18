@@ -397,11 +397,12 @@ impl TuiRenderer {
     }
 
     /// Render Claude Code-style framed prompt:
-    /// ╭─ ~/nexus [● main] · 3.9 MB · idle
+    /// ╭─ ~/nexus [● main] · #8f2a1b · 0.8 MB · idle
     /// ╰─❯ 
     pub fn render_prompt(
         workspace: &Path,
         git_branch: Option<&str>,
+        session_hash: Option<&str>,
         memory_kb: Option<usize>,
         context_pill: Option<&str>,
         theme: &ThemePalette,
@@ -415,9 +416,14 @@ impl TuiRenderer {
             None => "".to_string(),
         };
 
+        let hash_chip = match session_hash {
+            Some(h) if !h.is_empty() => format!(" · {}#{}", theme.brand_secondary, h),
+            _ => "".to_string(),
+        };
+
         let mem_str = match memory_kb {
             Some(kb) => format!("{:.1} MB", kb as f64 / 1024.0),
-            None => "~3.9 MB".to_string(),
+            None => "~0.8 MB".to_string(),
         };
 
         let ctx_chip = match context_pill {
@@ -426,13 +432,14 @@ impl TuiRenderer {
         };
 
         println!(
-            "{}╭─ {}{}{}{}{}{} · {}{}{} · {}{}idle{}",
+            "{}╭─ {}{}{}{}{}{}{} · {}{}{} · {}{}idle{}",
             theme.border,
             theme.text_primary,
             theme.bold,
             ws_str,
             theme.reset,
             branch_chip,
+            hash_chip,
             ctx_chip,
             theme.info,
             mem_str,

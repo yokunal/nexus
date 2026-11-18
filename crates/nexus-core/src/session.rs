@@ -87,9 +87,23 @@ impl SessionStore {
         Ok(())
     }
 
+    /// Deterministic, Git-style 7-character content-addressable hash generator
+    pub fn generate_short_hash(title: &str, now: &DateTime<Utc>) -> String {
+        use std::collections::hash_map::DefaultHasher;
+        use std::hash::{Hash, Hasher};
+
+        let mut hasher = DefaultHasher::new();
+        title.hash(&mut hasher);
+        now.timestamp_nanos_opt().unwrap_or(0).hash(&mut hasher);
+        let rand_val = Uuid::new_v4();
+        rand_val.hash(&mut hasher);
+        let h = hasher.finish();
+        format!("{:07x}", h & 0x0FFF_FFFF)
+    }
+
     pub fn create_session(&self, title: &str) -> Result<Session, SessionError> {
-        let id = Uuid::new_v4().to_string();
         let now = Utc::now();
+        let id = Self::generate_short_hash(title, &now);
         let conn = self.connect()?;
 
         conn.execute(
@@ -97,13 +111,73 @@ impl SessionStore {
             params![id, title, now.to_rfc3339(), now.to_rfc3339()],
         )?;
 
-        Ok(Session {
-            id,
+        let session = Session {
+            id: id.clone(),
             title: title.to_string(),
             created_at: now,
             updated_at: now,
             messages: Vec::new(),
-        })
+        };
+
+        let _ = self.export_manifest();
+        Ok(session)
+    }
+
+    fn append_transcript_jsonl(&self, session_id: &str, msg: &Message) {
+        if let Some(parent) = self.db_path.parent() {
+            let sessions_dir = parent.join("sessions");
+            let _ = std::fs::create_dir_all(&sessions_dir);
+            let file_path = sessions_dir.join(format!("{}.jsonl", session_id));
+            if let Ok(mut file) = std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(file_path)
+            {
+                use std::io::Write;
+                if let Ok(line) = serde_json::to_string(msg) {
+                    let _ = writeln!(file, "{}", line);
+                }
+            }
+        }
+    }
+
+    fn rewrite_transcript_jsonl(&self, session_id: &str, msgs: &[Message]) {
+        if let Some(parent) = self.db_path.parent() {
+            let sessions_dir = parent.join("sessions");
+            let _ = std::fs::create_dir_all(&sessions_dir);
+            let file_path = sessions_dir.join(format!("{}.jsonl", session_id));
+            let mut content = String::new();
+            for m in msgs {
+                if let Ok(line) = serde_json::to_string(m) {
+                    content.push_str(&line);
+                    content.push('\n');
+                }
+            }
+            let _ = std::fs::write(file_path, content);
+        }
+    }
+
+    pub fn export_manifest(&self) -> Result<(), SessionError> {
+        if let Some(parent) = self.db_path.parent() {
+            let sessions_dir = parent.join("sessions");
+            let _ = std::fs::create_dir_all(&sessions_dir);
+
+            if let Ok(sessions) = self.list_sessions(100) {
+                let manifest_path = sessions_dir.join("manifest.tsv");
+                let mut content = String::from("#HASH\tUPDATED_AT\tTURNS\tTITLE\n");
+                for (id, title, ts, count) in sessions {
+                    content.push_str(&format!(
+                        "{}\t{}\t{}\t{}\n",
+                        id,
+                        ts.to_rfc3339(),
+                        count,
+                        title.replace('\t', " ").replace('\n', " ")
+                    ));
+                }
+                let _ = std::fs::write(manifest_path, content);
+            }
+        }
+        Ok(())
     }
 
     pub fn save_message(&self, session_id: &str, msg: &Message) -> Result<(), SessionError> {
@@ -136,6 +210,9 @@ impl SessionStore {
             "UPDATE sessions SET updated_at = ?1 WHERE id = ?2",
             params![Utc::now().to_rfc3339(), session_id],
         )?;
+
+        self.append_transcript_jsonl(session_id, msg);
+        let _ = self.export_manifest();
 
         Ok(())
     }
@@ -186,6 +263,12 @@ impl SessionStore {
         )?;
 
         tx.commit()?;
+
+        for msg in msgs {
+            self.append_transcript_jsonl(session_id, msg);
+        }
+        let _ = self.export_manifest();
+
         Ok(())
     }
 
@@ -250,23 +333,32 @@ impl SessionStore {
         )?;
 
         tx.commit()?;
+
+        self.rewrite_transcript_jsonl(session_id, messages);
+        let _ = self.export_manifest();
+
         Ok(())
     }
 
+    /// Loads session with prefix matching (e.g. "8f2" matches "8f2a1b3") or full hash match.
     pub fn load_session(&self, session_id: &str) -> Result<Session, SessionError> {
         let conn = self.connect()?;
 
-        let mut stmt =
-            conn.prepare("SELECT title, created_at, updated_at FROM sessions WHERE id = ?1")?;
+        let mut stmt = conn.prepare(
+            "SELECT id, title, created_at, updated_at FROM sessions 
+             WHERE id = ?1 OR id LIKE (?1 || '%') 
+             ORDER BY updated_at DESC LIMIT 1",
+        )?;
         let session_data = stmt.query_row(params![session_id], |row| {
             Ok((
                 row.get::<_, String>(0)?,
                 row.get::<_, String>(1)?,
                 row.get::<_, String>(2)?,
+                row.get::<_, String>(3)?,
             ))
         });
 
-        let (title, created_at_str, updated_at_str) = match session_data {
+        let (canonical_id, title, created_at_str, updated_at_str) = match session_data {
             Ok(d) => d,
             Err(rusqlite::Error::QueryReturnedNoRows) => {
                 return Err(SessionError::NotFound(session_id.to_string()))
@@ -279,7 +371,7 @@ impl SessionStore {
              FROM messages WHERE session_id = ?1 ORDER BY id ASC",
         )?;
 
-        let message_rows = msg_stmt.query_map(params![session_id], |row| {
+        let message_rows = msg_stmt.query_map(params![&canonical_id], |row| {
             Ok((
                 row.get::<_, String>(0)?,
                 row.get::<_, String>(1)?,
@@ -311,7 +403,7 @@ impl SessionStore {
         let validated_messages = Self::validate_turns(messages);
 
         Ok(Session {
-            id: session_id.to_string(),
+            id: canonical_id,
             title,
             created_at: DateTime::parse_from_rfc3339(&created_at_str)
                 .map(|dt| dt.with_timezone(&Utc))
@@ -321,6 +413,50 @@ impl SessionStore {
                 .unwrap_or_else(|_| Utc::now()),
             messages: validated_messages,
         })
+    }
+
+    /// Loads the most recently updated session.
+    pub fn load_latest_session(&self) -> Result<Session, SessionError> {
+        let conn = self.connect()?;
+        let mut stmt = conn.prepare("SELECT id FROM sessions ORDER BY updated_at DESC LIMIT 1")?;
+        let latest_id: String = stmt.query_row([], |row| row.get(0)).map_err(|e| match e {
+            rusqlite::Error::QueryReturnedNoRows => {
+                SessionError::NotFound("No sessions found".to_string())
+            }
+            other => SessionError::Db(other),
+        })?;
+        self.load_session(&latest_id)
+    }
+
+    /// Lists recent sessions with turn counts for the `/sessions` command and manifest export.
+    pub fn list_sessions(
+        &self,
+        limit: usize,
+    ) -> Result<Vec<(String, String, DateTime<Utc>, usize)>, SessionError> {
+        let conn = self.connect()?;
+        let mut stmt = conn.prepare(
+            "SELECT s.id, s.title, s.updated_at, COUNT(m.id)
+             FROM sessions s
+             LEFT JOIN messages m ON m.session_id = s.id
+             GROUP BY s.id
+             ORDER BY s.updated_at DESC
+             LIMIT ?1",
+        )?;
+        let rows = stmt.query_map(params![limit], |row| {
+            let id: String = row.get(0)?;
+            let title: String = row.get(1)?;
+            let updated_str: String = row.get(2)?;
+            let count: usize = row.get(3)?;
+            let ts = DateTime::parse_from_rfc3339(&updated_str)
+                .map(|dt| dt.with_timezone(&Utc))
+                .unwrap_or_else(|_| Utc::now());
+            Ok((id, title, ts, count))
+        })?;
+        let mut list = Vec::new();
+        for r in rows {
+            list.push(r?);
+        }
+        Ok(list)
     }
 
     /// Turn validator: repairs dangling tails or mismatched alternating turn pairs.
@@ -461,5 +597,60 @@ mod tests {
         let _ = std::fs::remove_file(&temp_db);
         let _ = std::fs::remove_file(temp_db.with_extension("db-wal"));
         let _ = std::fs::remove_file(temp_db.with_extension("db-shm"));
+    }
+
+    #[test]
+    fn test_short_hash_generation_and_prefix_loading() {
+        let temp_dir = env::temp_dir().join(format!("nexus_test_shorthash_{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&temp_dir).unwrap();
+        let db_path = temp_dir.join("sessions.db");
+        let store = SessionStore::new(&db_path).unwrap();
+
+        let session = store.create_session("Documentation Website Build").unwrap();
+        // Assert 7-character Git-style content-addressable hash
+        assert_eq!(session.id.len(), 7);
+
+        let msg = Message {
+            role: "user".to_string(),
+            content: "Build website.md with retro theme".to_string(),
+            tool_calls: None,
+            tool_results: None,
+            timestamp: Utc::now(),
+        };
+        store.save_message(&session.id, &msg).unwrap();
+
+        // Test exact load
+        let exact_loaded = store.load_session(&session.id).unwrap();
+        assert_eq!(exact_loaded.id, session.id);
+        assert_eq!(exact_loaded.messages.len(), 1);
+
+        // Test prefix load (4 chars)
+        let prefix = &session.id[..4];
+        let prefix_loaded = store.load_session(prefix).unwrap();
+        assert_eq!(prefix_loaded.id, session.id);
+        assert_eq!(prefix_loaded.messages.len(), 1);
+
+        // Test latest session
+        let latest = store.load_latest_session().unwrap();
+        assert_eq!(latest.id, session.id);
+
+        // Test listing sessions
+        let list = store.list_sessions(10).unwrap();
+        assert_eq!(list.len(), 1);
+        assert_eq!(list[0].0, session.id);
+        assert_eq!(list[0].3, 1);
+
+        // Verify JSONL transcript file exists on disk
+        let jsonl_path = temp_dir.join("sessions").join(format!("{}.jsonl", session.id));
+        assert!(jsonl_path.exists());
+
+        // Verify manifest.tsv exists on disk
+        let manifest_path = temp_dir.join("sessions").join("manifest.tsv");
+        assert!(manifest_path.exists());
+        let manifest_content = std::fs::read_to_string(manifest_path).unwrap();
+        assert!(manifest_content.contains(&session.id));
+        assert!(manifest_content.contains("Documentation Website Build"));
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
     }
 }
