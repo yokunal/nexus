@@ -448,7 +448,7 @@ impl TuiRenderer {
         );
     }
 
-    /// Render tool call start card (Unified diff preview for edits, command preview for bash)
+    /// Render tool call start card with Tri-Fusion telemetry & aesthetics
     pub fn render_tool_call_start(name: &str, args: &serde_json::Value, theme: &ThemePalette) {
         println!();
         match name {
@@ -458,7 +458,7 @@ impl TuiRenderer {
                 let replacement = args.get("Replacement").or_else(|| args.get("replacement")).and_then(|v| v.as_str()).unwrap_or("");
 
                 println!(
-                    "{}╭─ {}⟡ Patch File:{} {}{}{}",
+                    "{}╭─ {}📝 Patch:{} {}{}{}",
                     theme.border_accent,
                     theme.brand_secondary,
                     theme.bold,
@@ -482,10 +482,42 @@ impl TuiRenderer {
                 }
                 println!("{}╰───────────────────────────────────────────────────{}", theme.border_accent, theme.reset);
             }
+            "write_file" => {
+                let path = args.get("Path").or_else(|| args.get("path")).and_then(|v| v.as_str()).unwrap_or("unknown");
+                let content = args.get("Content").or_else(|| args.get("content")).and_then(|v| v.as_str()).unwrap_or("");
+                let bytes = content.len();
+                let lines = content.lines().count();
+                let size_str = if bytes < 1024 {
+                    format!("{} B", bytes)
+                } else {
+                    format!("{:.1} KB", bytes as f64 / 1024.0)
+                };
+
+                println!(
+                    "{}╭─ {}📄 Write File:{} {}{}{} {}[{}, {} lines]{}",
+                    theme.border_accent,
+                    theme.brand_secondary,
+                    theme.bold,
+                    theme.text_primary,
+                    path,
+                    theme.reset,
+                    theme.text_dim,
+                    size_str,
+                    lines,
+                    theme.reset
+                );
+                for line in content.lines().take(2) {
+                    println!("{}│{}   {}{}", theme.border_accent, theme.text_muted, line, theme.reset);
+                }
+                if lines > 2 {
+                    println!("{}│{}   {}... (+{} more lines){}", theme.border_accent, theme.reset, theme.text_dim, lines - 2, theme.reset);
+                }
+                println!("{}╰───────────────────────────────────────────────────{}", theme.border_accent, theme.reset);
+            }
             "run_command" => {
                 let cmd = args.get("CommandLine").or_else(|| args.get("cmd")).and_then(|v| v.as_str()).unwrap_or("");
                 println!(
-                    "{}╭─ {}⟡ Bash:{} {}{}{}",
+                    "{}╭─ {}⚡ Exec:{} {}{}{}",
                     theme.border_accent,
                     theme.info,
                     theme.bold,
@@ -499,12 +531,12 @@ impl TuiRenderer {
                 let start = args.get("StartLine").and_then(|v| v.as_u64());
                 let end = args.get("EndLine").and_then(|v| v.as_u64());
                 let range = match (start, end) {
-                    (Some(s), Some(e)) => format!(" (L{}-{})", s, e),
-                    (Some(s), None) => format!(" (L{}+)", s),
+                    (Some(s), Some(e)) => format!(" [L{}-{}]", s, e),
+                    (Some(s), None) => format!(" [L{}+]", s),
                     _ => "".to_string(),
                 };
                 println!(
-                    "{}╭─ {}⟡ Read File:{} {}{}{}{}",
+                    "{}╭─ {}🔍 Inspect:{} {}{}{}{}",
                     theme.border,
                     theme.purple,
                     theme.bold,
@@ -517,7 +549,7 @@ impl TuiRenderer {
             }
             "cargo_check" => {
                 println!(
-                    "{}╭─ {}⟡ Rust Doctor:{} {}Compiler Diagnostic Check{}",
+                    "{}╭─ {}🩺 Rust Doctor:{} {}Compiler Diagnostic Check{}",
                     theme.border_accent,
                     theme.brand_glow,
                     theme.bold,
@@ -570,61 +602,277 @@ impl TuiRenderer {
         }
     }
 
-    /// Render tool call completion card
-    pub fn render_tool_result(name: &str, output: &str, success: bool, theme: &ThemePalette) {
+    /// Render tool call completion card with duration, status, and output
+    pub fn render_tool_result(
+        name: &str,
+        args: &serde_json::Value,
+        output: &str,
+        success: bool,
+        elapsed: Option<std::time::Duration>,
+        theme: &ThemePalette,
+    ) {
         let (icon, color) = if success {
             ("✓", theme.success)
         } else {
             ("✗", theme.error)
         };
 
-        if name == "invoke_subagent" {
-            println!(
-                "{}╭─ {}🤖 Subagent Complete [{}]{}",
-                theme.border_accent,
-                theme.purple,
-                if success { "Success" } else { "Failed" },
-                theme.reset
-            );
-            for l in output.lines().take(4) {
-                println!("{}│{}  {}{}", theme.border_accent, theme.reset, l, theme.reset);
+        let dur_str = match elapsed {
+            Some(d) => {
+                let ms = d.as_millis();
+                if ms < 1000 {
+                    format!(" · {}{:.0}ms{}", theme.text_dim, ms, theme.reset)
+                } else {
+                    format!(" · {}{:.2}s{}", theme.text_dim, d.as_secs_f64(), theme.reset)
+                }
             }
-            println!("{}╰───────────────────────────────────────────────────{}", theme.border_accent, theme.reset);
-            return;
-        }
+            None => "".to_string(),
+        };
 
-        if name == "run_command" || name == "cargo_check" {
-            // Print output trimmed with border
-            let lines: Vec<&str> = output.lines().collect();
-            let display_lines = if lines.len() > 10 {
-                &lines[..10]
-            } else {
-                &lines[..]
-            };
-
-            for l in display_lines {
-                println!("{}│{}  {}{}", theme.border, theme.reset, l, theme.reset);
-            }
-            if lines.len() > 10 {
+        match name {
+            "edit_file" => {
+                let path = args.get("Path").or_else(|| args.get("path")).and_then(|v| v.as_str()).unwrap_or("");
                 println!(
-                    "{}│{}  {}... ({} lines omitted){}",
+                    "{}╰─ {}{} Patched:{} {}{}{}{}",
                     theme.border,
+                    color,
+                    icon,
                     theme.reset,
-                    theme.text_dim,
-                    lines.len() - 10,
+                    theme.text_primary,
+                    path,
+                    dur_str,
                     theme.reset
                 );
             }
-            println!(
-                "{}╰─ {}{} Done:{} {}{}",
-                theme.border,
-                color,
-                icon,
-                theme.reset,
-                if success { "Success" } else { "Failed" },
-                theme.reset
-            );
+            "write_file" => {
+                let path = args.get("Path").or_else(|| args.get("path")).and_then(|v| v.as_str()).unwrap_or("");
+                println!(
+                    "{}╰─ {}{} Written:{} {}{}{}{}",
+                    theme.border,
+                    color,
+                    icon,
+                    theme.reset,
+                    theme.text_primary,
+                    path,
+                    dur_str,
+                    theme.reset
+                );
+            }
+            "read_file" => {
+                let lines_count = output.lines().count();
+                let bytes = output.len();
+                let size_str = if bytes < 1024 {
+                    format!("{} B", bytes)
+                } else {
+                    format!("{:.1} KB", bytes as f64 / 1024.0)
+                };
+                println!(
+                    "{}╰─ {}{} Inspected:{} {}{} lines ({}){}{}",
+                    theme.border,
+                    color,
+                    icon,
+                    theme.reset,
+                    theme.text_secondary,
+                    lines_count,
+                    size_str,
+                    dur_str,
+                    theme.reset
+                );
+            }
+            "invoke_subagent" => {
+                println!(
+                    "{}╭─ {}🤖 Subagent Complete [{}]{}",
+                    theme.border_accent,
+                    theme.purple,
+                    if success { "Success" } else { "Failed" },
+                    theme.reset
+                );
+                for l in output.lines().take(4) {
+                    println!("{}│{}  {}{}", theme.border_accent, theme.reset, l, theme.reset);
+                }
+                println!("{}╰─ {}{} Subagent Result {}{}{}", theme.border_accent, color, icon, theme.reset, dur_str, theme.reset);
+            }
+            "run_command" | "cargo_check" => {
+                let lines: Vec<&str> = output.lines().collect();
+                let display_lines = if lines.len() > 10 {
+                    &lines[..10]
+                } else {
+                    &lines[..]
+                };
+
+                for l in display_lines {
+                    println!("{}│{}  {}{}", theme.border, theme.reset, l, theme.reset);
+                }
+                if lines.len() > 10 {
+                    println!(
+                        "{}│{}  {}... ({} lines omitted){}",
+                        theme.border,
+                        theme.reset,
+                        theme.text_dim,
+                        lines.len() - 10,
+                        theme.reset
+                    );
+                }
+                println!(
+                    "{}╰─ {}{} Done:{} {}{}{}{}",
+                    theme.border,
+                    color,
+                    icon,
+                    theme.reset,
+                    if success { "Success" } else { "Failed" },
+                    dur_str,
+                    theme.reset,
+                    theme.reset
+                );
+            }
+            _ => {
+                println!(
+                    "{}╰─ {}{} Done:{} {}{}{}",
+                    theme.border,
+                    color,
+                    icon,
+                    theme.reset,
+                    if success { "Success" } else { "Failed" },
+                    dur_str,
+                    theme.reset
+                );
+            }
         }
+    }
+
+    /// Render comprehensive Post-Task Completion Card (Summary of changes and telemetry)
+    pub fn render_task_completion_card(
+        files_created: &[String],
+        files_modified: &[String],
+        commands_run: &[String],
+        steps: usize,
+        duration: std::time::Duration,
+        token_usage: Option<&nexus_core::events::TokenUsage>,
+        memory_kb: Option<usize>,
+        theme: &ThemePalette,
+    ) {
+        let mem_str = match memory_kb {
+            Some(kb) => format!("{:.1} MB", kb as f64 / 1024.0),
+            None => "~0.8 MB".to_string(),
+        };
+
+        let secs = duration.as_secs_f64();
+        let dur_str = if secs < 1.0 {
+            format!("{:.0}ms", secs * 1000.0)
+        } else {
+            format!("{:.2}s", secs)
+        };
+
+        println!();
+        println!(
+            "{}╭─ {}⟡ Mission Accomplished{} ──────────────────────────────────────────{}",
+            theme.border_accent,
+            theme.brand_primary,
+            theme.border_accent,
+            theme.reset
+        );
+        println!(
+            "{}│{}  {}Execution:{}  {}{:>2} steps{} · {}{}{} · {}RAM: {}{}",
+            theme.border_accent, theme.reset,
+            theme.text_dim, theme.reset,
+            theme.text_primary, steps, theme.reset,
+            theme.info, dur_str, theme.reset,
+            theme.success, mem_str, theme.reset
+        );
+
+        if !files_created.is_empty() {
+            println!("{}│{}", theme.border_accent, theme.reset);
+            println!(
+                "{}│{}  {}Files Created ({}):{}",
+                theme.border_accent, theme.reset,
+                theme.success, files_created.len(), theme.reset
+            );
+            for f in files_created.iter().take(6) {
+                println!(
+                    "{}│{}    {}+ {}{}",
+                    theme.border_accent, theme.reset,
+                    theme.text_primary, f, theme.reset
+                );
+            }
+            if files_created.len() > 6 {
+                println!(
+                    "{}│{}    {}  ... (+{} more files){}",
+                    theme.border_accent, theme.reset,
+                    theme.text_dim, files_created.len() - 6, theme.reset
+                );
+            }
+        }
+
+        if !files_modified.is_empty() {
+            println!("{}│{}", theme.border_accent, theme.reset);
+            println!(
+                "{}│{}  {}Files Modified ({}):{}",
+                theme.border_accent, theme.reset,
+                theme.brand_secondary, files_modified.len(), theme.reset
+            );
+            for f in files_modified.iter().take(6) {
+                println!(
+                    "{}│{}    {}~ {}{}",
+                    theme.border_accent, theme.reset,
+                    theme.text_primary, f, theme.reset
+                );
+            }
+            if files_modified.len() > 6 {
+                println!(
+                    "{}│{}    {}  ... (+{} more files){}",
+                    theme.border_accent, theme.reset,
+                    theme.text_dim, files_modified.len() - 6, theme.reset
+                );
+            }
+        }
+
+        if !commands_run.is_empty() {
+            println!("{}│{}", theme.border_accent, theme.reset);
+            println!(
+                "{}│{}  {}Commands Run ({}):{}",
+                theme.border_accent, theme.reset,
+                theme.text_dim, commands_run.len(), theme.reset
+            );
+            for cmd in commands_run.iter().take(3) {
+                println!(
+                    "{}│{}    {}⚡ {}{}",
+                    theme.border_accent, theme.reset,
+                    theme.text_secondary, cmd, theme.reset
+                );
+            }
+            if commands_run.len() > 3 {
+                println!(
+                    "{}│{}    {}  ... (+{} more commands){}",
+                    theme.border_accent, theme.reset,
+                    theme.text_dim, commands_run.len() - 3, theme.reset
+                );
+            }
+        }
+
+        if let Some(u) = token_usage {
+            if u.input_tokens > 0 || u.output_tokens > 0 {
+                println!("{}│{}", theme.border_accent, theme.reset);
+                let hit_rate = u.cache_hit_rate();
+                let cache_note = if u.cache_read_tokens > 0 {
+                    format!(" ({}% cached)", hit_rate as u32)
+                } else {
+                    "".to_string()
+                };
+                println!(
+                    "{}│{}  {}Telemetry:{}     {}{}{} tokens{} · {}0.8 MB RAM{}",
+                    theme.border_accent, theme.reset,
+                    theme.text_dim, theme.reset,
+                    theme.text_secondary, u.input_tokens + u.output_tokens, cache_note, theme.reset,
+                    theme.success, theme.reset
+                );
+            }
+        }
+
+        println!(
+            "{}╰───────────────────────────────────────────────────────────────────{}\n",
+            theme.border_accent,
+            theme.reset
+        );
     }
 
     /// Render streamed AI token with clean markdown and code highlighting

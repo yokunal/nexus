@@ -52,6 +52,14 @@ struct Cli {
     #[arg(long)]
     dangerously_skip_permissions: bool,
 
+    /// Maximum tool execution steps allowed per turn (default: 50)
+    #[arg(long, alias = "max-turns")]
+    max_steps: Option<usize>,
+
+    /// Run in unattended autonomous mode
+    #[arg(short = 'a', long)]
+    autonomous: bool,
+
     /// Search cross-session memory and exit
     #[arg(short = 's', long)]
     search: Option<String>,
@@ -207,6 +215,7 @@ fn try_import_claude_settings() -> Option<NexusConfig> {
                             api_key: token,
                             base_url,
                             model,
+                            max_tool_turns: Some(50),
                         });
                     }
                 }
@@ -385,6 +394,7 @@ fn run_setup_wizard() -> io::Result<NexusConfig> {
         api_key,
         base_url,
         model: default_model,
+        max_tool_turns: Some(50),
     };
 
     let _ = config.save();
@@ -1333,8 +1343,16 @@ Your workspace is at: {}.
         // Turn loop: stream model response, execute tools, repeat until model finishes
         let mut turn_active = true;
         let mut turn_counter = 0;
-        let max_tool_turns = 8;
+        let max_tool_turns = cli.max_steps
+            .or(config.max_tool_turns)
+            .unwrap_or(50);
         let mut last_turn_usage: Option<nexus_core::events::TokenUsage> = None;
+        let turn_start_time = std::time::Instant::now();
+        let mut files_created: Vec<String> = Vec::new();
+        let mut files_modified: Vec<String> = Vec::new();
+        let mut commands_run: Vec<String> = Vec::new();
+        let mut total_steps: usize = 0;
+        let mut consecutive_failures: Vec<String> = Vec::new();
 
         while turn_active {
             if turn_counter >= max_tool_turns {
@@ -1462,9 +1480,64 @@ Your workspace is at: {}.
 
                 let mut results = Vec::new();
                 for call in calls {
+                    total_steps += 1;
+                    let tool_start = std::time::Instant::now();
                     let result = tool_manager.execute(call).await;
-                    TuiRenderer::render_tool_result(&call.name, &result.output, !result.is_error, &theme);
+                    let elapsed = tool_start.elapsed();
+
+                    TuiRenderer::render_tool_result(
+                        &call.name,
+                        &call.arguments,
+                        &result.output,
+                        !result.is_error,
+                        Some(elapsed),
+                        &theme,
+                    );
+
+                    if !result.is_error {
+                        consecutive_failures.clear();
+                        match call.name.as_str() {
+                            "write_file" => {
+                                if let Some(p) = call.arguments.get("Path").or_else(|| call.arguments.get("path")).and_then(|v| v.as_str()) {
+                                    let p_str = p.to_string();
+                                    if !files_created.contains(&p_str) && !files_modified.contains(&p_str) {
+                                        files_created.push(p_str);
+                                    }
+                                }
+                            }
+                            "edit_file" => {
+                                if let Some(p) = call.arguments.get("Path").or_else(|| call.arguments.get("path")).and_then(|v| v.as_str()) {
+                                    let p_str = p.to_string();
+                                    if !files_modified.contains(&p_str) {
+                                        files_modified.push(p_str);
+                                    }
+                                }
+                            }
+                            "run_command" => {
+                                if let Some(c) = call.arguments.get("CommandLine").or_else(|| call.arguments.get("cmd")).and_then(|v| v.as_str()) {
+                                    commands_run.push(c.to_string());
+                                }
+                            }
+                            _ => {}
+                        }
+                    } else {
+                        consecutive_failures.push(format!("{}:{}", call.name, call.arguments));
+                    }
                     results.push(result);
+                }
+
+                // Circuit breaker check for repeated identical tool failures
+                if consecutive_failures.len() >= 3 {
+                    let first = &consecutive_failures[0];
+                    if consecutive_failures.iter().all(|f| f == first) {
+                        println!(
+                            "{}╭─ ⟡ Circuit Breaker Tripped ──────────────────────────────{}\n{}│{} Pausing: Repeated failure detected 3 times in a row for tool.\n{}╰──────────────────────────────────────────────────────────{}",
+                            theme.border_accent, theme.warning,
+                            theme.border_accent, theme.reset,
+                            theme.border_accent, theme.reset
+                        );
+                        break;
+                    }
                 }
 
                 let tool_result_msg = Message {
@@ -1476,9 +1549,46 @@ Your workspace is at: {}.
                 };
                 session.messages.push(tool_result_msg.clone());
                 let _ = session_store.save_message(&session.id, &tool_result_msg);
+
+                // In-flight compaction if token threshold is crossed mid-task!
+                if MacroCompactor::should_auto_compact(&session.messages, &context_budget) {
+                    let (new_history, summary) = MacroCompactor::compact_history(
+                        &session.messages,
+                        &workspace_dir,
+                        None,
+                        2,
+                    );
+                    session.messages = new_history;
+                    if let Err(err) = session_store.rewrite_session_messages(&session.id, &session.messages) {
+                        eprintln!("Warning: Failed to persist in-flight compacted session: {}", err);
+                    }
+                    println!(
+                        "{}│{} 🗜️ In-flight compacted {} turns ({} → {} tokens, {:.1}% saved){}",
+                        theme.border,
+                        theme.text_dim,
+                        summary.compacted_turns_count,
+                        summary.pre_compact_tokens,
+                        summary.post_compact_tokens,
+                        summary.reduction_percentage(),
+                        theme.reset
+                    );
+                }
             } else {
                 turn_active = false;
             }
+        }
+
+        if total_steps > 0 {
+            TuiRenderer::render_task_completion_card(
+                &files_created,
+                &files_modified,
+                &commands_run,
+                total_steps,
+                turn_start_time.elapsed(),
+                last_turn_usage.as_ref(),
+                get_process_memory_kb(),
+                &theme,
+            );
         }
 
         session.messages.shrink_to_fit();

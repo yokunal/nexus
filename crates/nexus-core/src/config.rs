@@ -42,6 +42,8 @@ pub struct NexusConfig {
     pub api_key: String,
     pub base_url: Option<String>,
     pub model: String,
+    #[serde(default)]
+    pub max_tool_turns: Option<usize>,
 }
 
 impl Default for NexusConfig {
@@ -52,6 +54,7 @@ impl Default for NexusConfig {
             api_key: String::new(),
             base_url: None,
             model: "claude-3-7-sonnet-20250219".to_string(),
+            max_tool_turns: Some(50),
         }
     }
 }
@@ -95,6 +98,7 @@ impl NexusConfig {
                     api_key: token,
                     base_url,
                     model,
+                    max_tool_turns: Some(50),
                 });
             }
         }
@@ -197,6 +201,7 @@ mod tests {
             api_key: "sk-ant-test-key".to_string(),
             base_url: Some("https://api.aicredits.in".to_string()),
             model: "z-ai/glm-5.3-flash".to_string(),
+            max_tool_turns: Some(50),
         };
 
         let json = serde_json::to_string_pretty(&cfg).unwrap();
