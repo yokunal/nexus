@@ -292,7 +292,7 @@ impl ThemePalette {
 pub struct TuiRenderer;
 
 impl TuiRenderer {
-    /// Render the iconic Claude Code-style header banner with rounded corners & status badges
+    /// Render the iconic Claude Code-style header banner with Nexus ASCII logo & onboarding badges
     pub fn render_banner(
         config: &NexusConfig,
         workspace: &Path,
@@ -305,7 +305,7 @@ impl TuiRenderer {
         if config.display_mode == DisplayMode::Minimal {
             let branch_str = git_branch.map(|b| format!(" [{}]", b)).unwrap_or_default();
             println!(
-                "{}✻ Nexus{} [{}] (session in {}{}{})",
+                "{}◈ Nexus{} [{}] (session in {}{}{})",
                 theme.brand_primary,
                 theme.reset,
                 config.model,
@@ -317,82 +317,79 @@ impl TuiRenderer {
         }
 
         let branch_chip = match git_branch {
-            Some(b) => format!(" {}git: {}{}", theme.success, b, theme.reset),
+            Some(b) => format!(" {}[● {}]{}", theme.success, b, theme.reset),
             None => "".to_string(),
         };
 
         let mem_chip = match memory_kb {
             Some(kb) => format!("{:.1} MB", kb as f64 / 1024.0),
-            None => "~3.9 MB".to_string(),
+            None => "~0.5 MB".to_string(),
         };
 
-        let endpoint_str = config.base_url.as_deref().unwrap_or("https://api.anthropic.com");
-
-        let tagline = "· 7MB of pure native arrogance";
-
-        let prefix_len: usize = 25; // "╭─ ✻  N E X U S  v0.1.0  "
-        let total_target: usize = 74;
-        let dashes_count = total_target.saturating_sub(prefix_len + tagline.chars().count()).max(3);
-        let dashes = "─".repeat(dashes_count);
-
-        println!();
-        println!(
-            "{}╭─ {}✻  N E X U S{}  {}v0.1.0{}  {}{}{} {}{}",
-            theme.border,
-            theme.brand_primary,
-            theme.bold,
-            theme.text_dim,
-            theme.reset,
-            theme.brand_secondary,
-            tagline,
-            theme.border,
-            dashes,
-            theme.reset
-        );
-        println!(
-            "{}│{}  {}Model:{}     {}{}{}",
-            theme.border, theme.reset, theme.text_dim, theme.text_primary, config.model, theme.reset, theme.reset
-        );
-        println!(
-            "{}│{}  {}Endpoint:{}  {}{}{}",
-            theme.border, theme.reset, theme.text_dim, theme.text_muted, endpoint_str, theme.reset, theme.reset
-        );
-        println!(
-            "{}│{}  {}Workspace:{} {}{}{}{}",
-            theme.border, theme.reset, theme.text_dim, theme.reset, theme.text_primary, workspace.display(), branch_chip, theme.reset
-        );
-
         let rea_str = if rea_available {
-            format!("{}REA: On{}", theme.info, theme.reset)
+            format!("{}REA: Active{}", theme.info, theme.reset)
         } else {
             format!("{}REA: Off{}", theme.text_dim, theme.reset)
         };
 
-        let plugins_str = if plugins_count > 0 {
-            format!("{}Plugins: {}{}", theme.purple, plugins_count, theme.reset)
+        let plugins_chip = if plugins_count > 0 {
+            format!("  ·  {}Plugins: {}{}", theme.purple, plugins_count, theme.reset)
         } else {
-            format!("{}Plugins: None{}", theme.text_dim, theme.reset)
+            "".to_string()
         };
 
+        println!();
         println!(
-            "{}│{}  {}Status:{}    {}RAM: {}{}  ·  {}  ·  {}  ·  {}Theme: {}{}",
-            theme.border,
-            theme.reset,
-            theme.text_dim,
-            theme.reset,
-            theme.success,
-            mem_chip,
-            theme.reset,
-            rea_str,
-            plugins_str,
-            theme.brand_secondary,
-            theme.name,
+            "{}╭─────────────────────────────────────────────────────────────────────────{}",
+            theme.border, theme.reset
+        );
+        println!(
+            "{}│  {}{}_  _ _____ _  _ _  _ ____ {}{}",
+            theme.border, theme.bold, theme.brand_primary, theme.reset, theme.reset
+        );
+        println!(
+            "{}│  {}{}| \\| | ____\\ \\/ / | | / ___|{}  {}N E X U S{}  {}v0.2.0{}",
+            theme.border, theme.bold, theme.brand_secondary, theme.reset,
+            theme.bold, theme.reset, theme.text_dim, theme.reset
+        );
+        println!(
+            "{}│  {}{}| .` |  _|  >  <| |_| \\___ \\{}  {}Native Autonomous Coding Cockpit{}",
+            theme.border, theme.bold, theme.brand_glow, theme.reset,
+            theme.text_secondary, theme.reset
+        );
+        println!(
+            "{}│  {}{}|_|\\_|_____/_/\\_\\\\___/|____/{}  {}Zero-Lock Neural-FS Memory{}",
+            theme.border, theme.bold, theme.brand_primary, theme.reset,
+            theme.text_dim, theme.reset
+        );
+        println!("{}│{}", theme.border, theme.reset);
+        println!(
+            "{}│  {}Model:     {}{}{}",
+            theme.border, theme.text_dim, theme.text_primary, config.model, theme.reset
+        );
+        println!(
+            "{}│  {}Workspace: {}{}{}{}",
+            theme.border, theme.text_dim, theme.text_primary, workspace.display(), branch_chip, theme.reset
+        );
+        println!(
+            "{}│  {}Telemetry: {}RAM: {}{}  ·  {}Theme: {}{}  ·  {}{}{}",
+            theme.border, theme.text_dim,
+            theme.success, mem_chip, theme.reset,
+            theme.brand_secondary, theme.name, theme.reset,
+            rea_str, plugins_chip, theme.reset
+        );
+        println!("{}│{}", theme.border, theme.reset);
+        println!(
+            "{}│  {}Quick Tips:  {}/help{} (commands) · {}/sessions{} (history) · {}/expand{} (Ctrl+O toggle){}",
+            theme.border, theme.text_dim,
+            theme.brand_primary, theme.text_dim,
+            theme.brand_primary, theme.text_dim,
+            theme.brand_primary, theme.text_dim,
             theme.reset
         );
         println!(
             "{}╰─────────────────────────────────────────────────────────────────────────{}\n",
-            theme.border,
-            theme.reset
+            theme.border, theme.reset
         );
     }
 
@@ -524,12 +521,14 @@ impl TuiRenderer {
             "run_command" => {
                 let cmd = args.get("CommandLine").or_else(|| args.get("cmd")).and_then(|v| v.as_str()).unwrap_or("");
                 println!(
-                    "{}╭─ {}⚡ Exec:{} {}{}{}",
+                    "{}╭─ {}⚡ Shell:{} {}{}{} {}[background]{}",
                     theme.border_accent,
                     theme.info,
                     theme.bold,
                     theme.text_primary,
                     cmd,
+                    theme.reset,
+                    theme.text_dim,
                     theme.reset
                 );
             }
@@ -616,6 +615,7 @@ impl TuiRenderer {
         output: &str,
         success: bool,
         elapsed: Option<std::time::Duration>,
+        expand: bool,
         theme: &ThemePalette,
     ) {
         let (icon, color) = if success {
@@ -700,37 +700,79 @@ impl TuiRenderer {
                 println!("{}╰─ {}{} Subagent Result {}{}{}", theme.border_accent, color, icon, theme.reset, dur_str, theme.reset);
             }
             "run_command" | "cargo_check" => {
-                let lines: Vec<&str> = output.lines().collect();
-                let display_lines = if lines.len() > 10 {
-                    &lines[..10]
-                } else {
-                    &lines[..]
-                };
+                if expand {
+                    let lines: Vec<&str> = output.lines().collect();
+                    let display_lines = if lines.len() > 25 {
+                        &lines[..25]
+                    } else {
+                        &lines[..]
+                    };
 
-                for l in display_lines {
-                    println!("{}│{}  {}{}", theme.border, theme.reset, l, theme.reset);
-                }
-                if lines.len() > 10 {
+                    for l in display_lines {
+                        println!("{}│{}  {}{}", theme.border, theme.reset, l, theme.reset);
+                    }
+                    if lines.len() > 25 {
+                        println!(
+                            "{}│{}  {}... ({} lines omitted){}",
+                            theme.border,
+                            theme.reset,
+                            theme.text_dim,
+                            lines.len() - 25,
+                            theme.reset
+                        );
+                    }
                     println!(
-                        "{}│{}  {}... ({} lines omitted){}",
+                        "{}╰─ {}{} Done:{} {}{}{}{} {}[expanded]{}",
                         theme.border,
+                        color,
+                        icon,
+                        theme.reset,
+                        if success { "Success" } else { "Failed" },
+                        dur_str,
+                        theme.reset,
                         theme.reset,
                         theme.text_dim,
-                        lines.len() - 10,
                         theme.reset
                     );
+                } else {
+                    // Clean background collapsed mode (does not pollute chat!)
+                    if success {
+                        let lines_count = output.lines().count();
+                        let hint = if lines_count > 0 {
+                            format!(" {}[{} lines · Ctrl+O to expand]{}", theme.text_dim, lines_count, theme.reset)
+                        } else {
+                            "".to_string()
+                        };
+                        println!(
+                            "{}╰─ {}{} Done:{} {}{}{}{}",
+                            theme.border,
+                            color,
+                            icon,
+                            theme.reset,
+                            "Success",
+                            dur_str,
+                            hint,
+                            theme.reset
+                        );
+                    } else {
+                        // Failed: show last 3-4 error lines so the failure reason is obvious
+                        let lines: Vec<&str> = output.lines().collect();
+                        let tail = lines.len().saturating_sub(4);
+                        for l in &lines[tail..] {
+                            println!("{}│  {}{}{}", theme.border, theme.error, l, theme.reset);
+                        }
+                        println!(
+                            "{}╰─ {}{} Failed:{} {}{}{}",
+                            theme.border,
+                            color,
+                            icon,
+                            theme.reset,
+                            "Command Error",
+                            dur_str,
+                            theme.reset
+                        );
+                    }
                 }
-                println!(
-                    "{}╰─ {}{} Done:{} {}{}{}{}",
-                    theme.border,
-                    color,
-                    icon,
-                    theme.reset,
-                    if success { "Success" } else { "Failed" },
-                    dur_str,
-                    theme.reset,
-                    theme.reset
-                );
             }
             _ => {
                 println!(

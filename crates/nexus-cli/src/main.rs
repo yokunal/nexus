@@ -67,6 +67,10 @@ struct Cli {
     /// Launch interactive setup wizard (theme, text mode, provider)
     #[arg(long)]
     setup: bool,
+
+    /// Expand tool execution output (show full stdout/stderr instead of collapsed background)
+    #[arg(long, alias = "verbose")]
+    expand: bool,
 }
 
 #[cfg(windows)]
@@ -596,7 +600,7 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     let mut base_system_prompt = format!(
-        "You are Nexus, an elite autonomous AI coding harness built in native Rust.
+        "You are Nexus, an elite autonomous AI coding cockpit.
 You specialize in writing clean, modular, and robust software with an emphasis on idiomatic code, clean architecture, and precision edits.
 Your workspace is at: {}.
 {}
@@ -624,6 +628,7 @@ Your workspace is at: {}.
     let mut session_tokens = nexus_core::events::TokenUsage::default();
     let context_budget = ContextBudget::default();
     let mut pending_interrupted_output: Option<String> = None;
+    let mut expand_tool_output: bool = cli.expand;
 
     loop {
         // Non-blocking check for hotloaded skill notifications
@@ -657,6 +662,34 @@ Your workspace is at: {}.
         let mut input = String::new();
         if io::stdin().read_line(&mut input)? == 0 {
             break; // EOF
+        }
+
+        // Toggle tool output expansion (collapsed background vs full output) via Ctrl+O or /expand
+        if input.contains('\x0f') || input.trim() == "/expand" || input.trim() == "/verbose" {
+            expand_tool_output = !expand_tool_output;
+            let clean = input.replace('\x0f', "");
+            let clean_trimmed = clean.trim().to_string();
+            if clean_trimmed.is_empty() || clean_trimmed == "/expand" || clean_trimmed == "/verbose" {
+                if expand_tool_output {
+                    println!(
+                        "{}⟡ Tool output: {}EXPANDED{} (showing full stdout/stderr). Press {}Ctrl+O{} or type {}/expand{} to collapse.{}",
+                        theme.border, theme.info, theme.border, theme.brand_primary, theme.border, theme.brand_primary, theme.border, theme.reset
+                    );
+                } else {
+                    println!(
+                        "{}⟡ Tool output: {}COLLAPSED{} (silent background execution). Press {}Ctrl+O{} or type {}/expand{} to expand.{}",
+                        theme.border, theme.success, theme.border, theme.brand_primary, theme.border, theme.brand_primary, theme.border, theme.reset
+                    );
+                }
+                continue;
+            } else {
+                if expand_tool_output {
+                    println!("{}⟡ Tool output: EXPANDED{}", theme.text_dim, theme.reset);
+                } else {
+                    println!("{}⟡ Tool output: COLLAPSED{}", theme.text_dim, theme.reset);
+                }
+                input = clean;
+            }
         }
 
         let trimmed = input.trim();
@@ -701,6 +734,7 @@ Your workspace is at: {}.
         if trimmed == "/help" {
             println!("\x1b[1;33mAvailable Commands:\x1b[0m");
             println!("  !<command>              - Execute shell command directly in workspace (zero API tokens)");
+            println!("  /expand (or Ctrl+O)     - Toggle collapsed vs expanded tool execution output");
             println!("  /doctor                 - Run compiler diagnostic check and trigger targeted repair");
             println!("  /compact [focus]        - Compact session turns into structured summary (<context_summary>)");
             println!("  /context                - Show context window usage, capacity, and auto-compact threshold");
@@ -1469,22 +1503,84 @@ Your workspace is at: {}.
             });
 
             let mut current_turn_text = String::new();
-            TuiRenderer::render_ai_prefix(&theme);
-            io::stdout().flush()?;
+            let mut ai_prefix_printed = false;
+            let mut thinking_active = true;
+            let mut in_thinking_tag = false;
+            let mut spinner_interval = tokio::time::interval(std::time::Duration::from_millis(90));
+            let spinner_frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+            let mut frame_idx = 0;
+
+            print!("{}⟡ Nexus is thinking...{}", theme.brand_secondary, theme.reset);
+            let _ = io::stdout().flush();
 
             let mut interrupted_by_user = false;
             loop {
                 tokio::select! {
+                    _ = spinner_interval.tick(), if thinking_active => {
+                        let f = spinner_frames[frame_idx % spinner_frames.len()];
+                        frame_idx += 1;
+                        print!("\r\x1b[2K{}{} ⟡ Nexus is thinking...{}", theme.brand_glow, f, theme.reset);
+                        let _ = io::stdout().flush();
+                    }
                     maybe_event = rx.recv() => {
                         match maybe_event {
                             Some(event) => {
                                 match event {
                                     NexusEvent::TokenChunk(chunk) => {
+                                        if thinking_active {
+                                            thinking_active = false;
+                                            print!("\r\x1b[2K");
+                                            let _ = io::stdout().flush();
+                                        }
+
+                                        // Handle <thinking> reasoning tags gracefully
+                                        if chunk.contains("<thinking>") {
+                                            in_thinking_tag = true;
+                                            println!("{}╭─ {}✻ Reasoning Process ───────────────────────────────{}", theme.border_accent, theme.brand_glow, theme.reset);
+                                            print!("{}│{} {}", theme.border_accent, theme.reset, theme.text_dim);
+                                            let rest = chunk.replace("<thinking>", "");
+                                            print!("{}", rest);
+                                            let _ = io::stdout().flush();
+                                            current_turn_text.push_str(&chunk);
+                                            continue;
+                                        }
+
+                                        if in_thinking_tag {
+                                            if chunk.contains("</thinking>") {
+                                                in_thinking_tag = false;
+                                                let parts: Vec<&str> = chunk.splitn(2, "</thinking>").collect();
+                                                print!("{}{}", parts[0], theme.reset);
+                                                println!("\n{}╰───────────────────────────────────────────────────{}", theme.border_accent, theme.reset);
+                                                if parts.len() > 1 && !parts[1].trim().is_empty() {
+                                                    TuiRenderer::render_ai_prefix(&theme);
+                                                    ai_prefix_printed = true;
+                                                    print!("{}", parts[1]);
+                                                }
+                                                let _ = io::stdout().flush();
+                                                current_turn_text.push_str(&chunk);
+                                                continue;
+                                            } else {
+                                                print!("{}", chunk);
+                                                let _ = io::stdout().flush();
+                                                current_turn_text.push_str(&chunk);
+                                                continue;
+                                            }
+                                        }
+
+                                        if !ai_prefix_printed {
+                                            TuiRenderer::render_ai_prefix(&theme);
+                                            ai_prefix_printed = true;
+                                        }
                                         print!("{}", chunk);
                                         io::stdout().flush()?;
                                         current_turn_text.push_str(&chunk);
                                     }
                                     NexusEvent::ToolCallStarted(ref call) => {
+                                        if thinking_active {
+                                            thinking_active = false;
+                                            print!("\r\x1b[2K");
+                                            let _ = io::stdout().flush();
+                                        }
                                         TuiRenderer::render_tool_call_start(&call.name, &call.arguments, &theme);
                                     }
                                     NexusEvent::TokenUsageRecorded(usage) => {
@@ -1501,6 +1597,10 @@ Your workspace is at: {}.
                         }
                     }
                     _ = tokio::signal::ctrl_c() => {
+                        if thinking_active {
+                            print!("\r\x1b[2K");
+                            let _ = io::stdout().flush();
+                        }
                         println!("\n{}⟡ Interrupted by user (Ctrl+C).{}", theme.warning, theme.reset);
                         interrupted_by_user = true;
                         handle.abort();
@@ -1577,6 +1677,7 @@ Your workspace is at: {}.
                         &result.output,
                         !result.is_error,
                         Some(elapsed),
+                        expand_tool_output,
                         &theme,
                     );
 
