@@ -1244,6 +1244,11 @@ Your workspace is at: {}.
 
         let mut active_system_prompt = base_system_prompt.clone();
 
+        active_system_prompt.push_str(&format!(
+            "\n\n### Current Session Context:\n- Active Session Hash: #{}\n- Resume Command: `nexus -r {}` (or `nexus -c` to continue latest conversation)\n- Workspace: {}",
+            session.id, session.id, workspace_dir.display()
+        ));
+
         // Inject active skills into prompt dynamically
         if let Ok(skills) = SkillManager::load_all(&workspace_dir) {
             let skills_prompt = SkillManager::format_skills_prompt(&skills);
