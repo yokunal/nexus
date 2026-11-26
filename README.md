@@ -1,8 +1,22 @@
-# Claude Code & Nexus 2.0: Official Technical Documentation & Architecture Reference
+# Nexus 2.0: Native Autonomous AI Coding Cockpit
 
 > **Version:** 2.0.0-PROD  
 > **Repository:** https://github.com/yokunal/nexus  
+> **Docs:** https://github.com/yokunal/nexus-docs  
 > **Status:** Production-Ready / Enterprise Grade  
+
+---
+
+## About
+
+**Nexus** is a fast, lightweight (~6.1 MB release binary), autonomous AI coding cockpit built in native Rust (Edition 2021). Built to rival and extend terminal coding assistants like Claude Code, Nexus combines deterministic compiler/LSP diagnostics, crash-safe append-only Write-Ahead Logging (WAL), zero-lock **Neural-FS** session memory with 7-character Git-style hashes (`#4419ae4`), parallel multi-agent swarms, and a modern **Tri-Fusion TUI**.
+
+### Key Highlights
+- **Tri-Fusion Terminal UI:** ASCII onboarding banner, animated `⟡ Nexus is thinking...` spinner, styled `<thinking>` reasoning blocks, silent background bash execution (collapsed one-line status cards), and instant **`Ctrl+O` / `/expand`** output toggling.
+- **Neural-FS Zero-Lock Session Memory:** Append-only `.jsonl` transcripts and `manifest.tsv` index with deterministic 7-char Git-style hashes—resume any session instantly with `nexus -r <hash>` or `nexus -c`.
+- **Autonomous Plan-Act-Verify (PAV) Engine:** Configurable step ceilings (`--max-steps`, default `50`), unattended `-a / --autonomous` mode, automatic in-flight context compaction, and stuck-loop circuit breakers.
+- **Safety & Durability:** Workspace path sandboxing, destructive-command quarantine, CRC32-verified circular WAL persistence, and automatic per-turn Git snapshots.
+- **Verified Quality:** Backed by the Nexus 2.0 Crucible Test Battery (75/75 test cases across 5 vectors in `crates/nexus-v2`, plus `nexus-core` unit and integration suites).
 
 ---
 
@@ -16,6 +30,7 @@ This document serves as the comprehensive guide covering architecture, CLI usage
 
 ## Table of Contents
 
+0. [About](#about)
 1. [Introduction & Philosophy](#1-introduction--philosophy)
 2. [Architecture & System Design](#2-architecture--system-design)
 3. [Claude Code vs. Nexus: Feature Comparison Matrix](#3-claude-code-vs-nexus-feature-comparison-matrix)
@@ -131,21 +146,31 @@ Nexus remembers important architectural decisions across distinct terminal sessi
 
 ## 6. CLI Commands & Interactive TUI
 
-Nexus provides a rich set of command-line operations:
+Nexus provides a rich set of command-line flags and interactive TUI controls:
 
 ```bash
-# Start an interactive coding session with autonomous loop active
-nexus start --model claude-3-5-sonnet
+# Start an interactive coding session in the current workspace
+nexus
 
-# Run code review and auto-fix diagnostics on current directory
-nexus review --auto-fix
+# Continue the most recent session seamlessly
+nexus -c
 
-# Execute a parallel subagent task swarm
-nexus swarm --topology parallel --task "Refactor storage engine WAL compaction"
+# Resume a specific session by 7-character hash (or UUID)
+nexus -r 4419ae4
 
-# Inspect cross-session memory index
-nexus memory search "write-ahead log"
+# Run in autonomous mode with an expanded 50-step ceiling and verbose tool output
+nexus -a --max-steps 50 --expand
+
+# Search cross-session memory and exit
+nexus -s "write-ahead log"
 ```
+
+### Interactive TUI Controls & Slash Commands
+- **`Ctrl+O` / `/expand`** — Toggle between collapsed background shell execution and full stdout/stderr output
+- **`/sessions` & `/resume <hash>`** — Browse recent sessions by 7-char hash and switch conversations live
+- **`/doctor`**, **`/qa`**, **`/loop [goal]`**, **`/ship`** — Run diagnostics, automated QA loops, PAV execution, and pre-landing verification
+- **`/compact [focus]`**, **`/context`**, **`/tokens`** — Inspect context window budget and compact session history
+- **`/theme [name]`** — Switch terminal color palettes (`claude`, `cyberpunk`, `tokyo`, `amber`, `nordic`, `light`, `plain`)
 
 ---
 
