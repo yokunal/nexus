@@ -204,4 +204,11 @@ Nexus undergoes continuous automated stress testing. The **NEXUS 2.0 Crucible Te
 
 ---
 
+## License
+
+Copyright © 2026 Kunal Jha (`yokunal`). **All Rights Reserved.**  
+This repository contains proprietary software. See [LICENSE](./LICENSE) for full terms—no permission is granted to copy, modify, redistribute, or use this software without express written consent.
+
+---
+
 *Official Documentation — Nexus Elite Autonomous AI Coding Harness (v2.0)*
